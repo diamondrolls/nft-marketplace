@@ -21,12 +21,12 @@
     const supabase = supabase.createClient(supabaseUrl, supabaseKey);
 
     // Redirect to login page if not logged in
-  client.auth.getSession().then(({ data }) => {
-    if (!data.session) {
-      window.location.href = 'https://diamondrolls.github.io/play/';
-    }
-  });
-   
+  supabase.auth.getSession().then(({ data }) => {
+  if (!data.session) {
+    window.location.href = 'https://diamondrolls.github.io/play/';
+  }
+});
+
     // ---- Wallet Setup ----
     let provider, signer, userAddress;
     const platformWallet = "0xaE0C180e071eE288B2F2f6ff6edaeF014678fFB7"; // where you collect fees/payments
