@@ -20,6 +20,13 @@
     const supabaseKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZqdHpvZGp1ZHljdHFhY3VubHFwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTgwNjA2OTQsImV4cCI6MjA3MzYzNjY5NH0.qR9RBsecfGUfKnbWgscmxloM-oEClJs_bo5YWoxFoE4";
     const supabase = supabase.createClient(supabaseUrl, supabaseKey);
 
+    // Redirect to login page if not logged in
+  client.auth.getSession().then(({ data }) => {
+    if (!data.session) {
+      window.location.href = 'https://diamondrolls.github.io/play/';
+    }
+  });
+   
     // ---- Wallet Setup ----
     let provider, signer, userAddress;
     const platformWallet = "0xaE0C180e071eE288B2F2f6ff6edaeF014678fFB7"; // where you collect fees/payments
