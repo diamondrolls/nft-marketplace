@@ -43,22 +43,43 @@
     }
 
     // ---- Load NFTs from Supabase ----
-    async function loadNFTs() {
-      const { data: nfts, error } = await supabase.from("nfts").select("*").eq("sold", false);
-      if (error) {
-        console.log(error);
-        return;
-      }
-      const container = document.getElementById("nft-list");
-      container.innerHTML = nfts.map(nft => `
-        <div style="border:1px solid #ddd; margin:10px; padding:10px; width:250px;">
-          <img src="${nft.image_url}" width="200"><br>
-          <b>${nft.name}</b><br>
-          $${nft.price}<br>
-          <button onclick="buyNFT(${nft.id}, ${nft.price})">Buy with MetaMask</button>
+    // ---- Load NFTs from Supabase ----
+async function loadNFTs() {
+  const { data: nfts, error } = await supabase.from("nfts").select("*");
+  if (error) {
+    console.log(error);
+    return;
+  }
+
+  const container = document.getElementById("nft-list");
+  container.innerHTML = "";
+
+  for (const nft of nfts) {
+    let html = `
+      <div style="border:1px solid #ddd; margin:10px; padding:10px; width:250px;">
+        <img src="${nft.image_url}" width="200"><br>
+        <b>${nft.name}</b><br>
+        $${nft.price}<br>
+    `;
+
+    if (!nft.sold) {
+      html += `<button onclick="buyNFT(${nft.id}, ${nft.price})">Buy with MetaMask</button>`;
+    } else if (nft.buyer_wallet?.toLowerCase() === userAddress?.toLowerCase()) {
+      html += `
+        <div>
+          <input id="transfer-${nft.id}" placeholder="Recipient wallet" style="width:90%; margin-top:6px;">
+          <button onclick="transferNFT(${nft.id})">Transfer ($6 fee)</button>
         </div>
-      `).join("");
+      `;
+    } else {
+      html += `<p style="color:gray;">Sold</p>`;
     }
+
+    html += "</div>";
+    container.innerHTML += html;
+  }
+}
+
 
     // ---- Buy NFT ----
     async function buyNFT(nftId, priceUSD) {
