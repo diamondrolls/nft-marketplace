@@ -21,11 +21,11 @@
     const supabase = supabase.createClient(supabaseUrl, supabaseKey);
 
     // Redirect to login page if not logged in
-  supabase.auth.getSession().then(({ data }) => {
-  if (!data.session) {
-    window.location.href = 'https://diamondrolls.github.io/play/';
-  }
-});
+    supabase.auth.getSession().then(({ data }) => {
+      if (!data.session) {
+        window.location.href = 'https://diamondrolls.github.io/play/';
+      }
+    });
 
     // ---- Wallet Setup ----
     let provider, signer, userAddress;
@@ -37,49 +37,48 @@
         signer = await provider.getSigner();
         userAddress = await signer.getAddress();
         document.getElementById("wallet-address").innerText = "Connected: " + userAddress;
+        loadNFTs();
       } else {
         alert("Please install MetaMask!");
       }
     }
 
-    // ---- Load NFTs from Supabase ----
-    // ---- Load NFTs from Supabase ----
-async function loadNFTs() {
-  const { data: nfts, error } = await supabase.from("nfts").select("*");
-  if (error) {
-    console.log(error);
-    return;
-  }
+    // ---- Load NFTs ----
+    async function loadNFTs() {
+      const { data: nfts, error } = await supabase.from("nfts").select("*");
+      if (error) {
+        console.error(error);
+        return;
+      }
 
-  const container = document.getElementById("nft-list");
-  container.innerHTML = "";
+      const container = document.getElementById("nft-list");
+      container.innerHTML = "";
 
-  for (const nft of nfts) {
-    let html = `
-      <div style="border:1px solid #ddd; margin:10px; padding:10px; width:250px;">
-        <img src="${nft.image_url}" width="200"><br>
-        <b>${nft.name}</b><br>
-        $${nft.price}<br>
-    `;
+      for (const nft of nfts) {
+        let html = `
+          <div style="border:1px solid #ddd; margin:10px; padding:10px; width:250px;">
+            <img src="${nft.image_url}" width="200"><br>
+            <b>${nft.name}</b><br>
+            $${nft.price}<br>
+        `;
 
-    if (!nft.sold) {
-      html += `<button onclick="buyNFT(${nft.id}, ${nft.price})">Buy with MetaMask</button>`;
-    } else if (nft.buyer_wallet?.toLowerCase() === userAddress?.toLowerCase()) {
-      html += `
-        <div>
-          <input id="transfer-${nft.id}" placeholder="Recipient wallet" style="width:90%; margin-top:6px;">
-          <button onclick="transferNFT(${nft.id})">Transfer ($6 fee)</button>
-        </div>
-      `;
-    } else {
-      html += `<p style="color:gray;">Sold</p>`;
+        if (!nft.sold) {
+          html += `<button onclick="buyNFT(${nft.id}, ${nft.price})">Buy with MetaMask</button>`;
+        } else if (nft.buyer_wallet?.toLowerCase() === userAddress?.toLowerCase()) {
+          html += `
+            <div>
+              <input id="transfer-${nft.id}" placeholder="Recipient wallet" style="width:90%; margin-top:6px;">
+              <button onclick="transferNFT(${nft.id})">Transfer ($6 fee)</button>
+            </div>
+          `;
+        } else {
+          html += `<p style="color:gray;">Sold</p>`;
+        }
+
+        html += "</div>";
+        container.innerHTML += html;
+      }
     }
-
-    html += "</div>";
-    container.innerHTML += html;
-  }
-}
-
 
     // ---- Buy NFT ----
     async function buyNFT(nftId, priceUSD) {
@@ -88,58 +87,9 @@ async function loadNFTs() {
         return;
       }
 
-      // ---- Transfer NFT ----
-async function transferNFT(nftId) {
-  if (!signer) {
-    alert("Connect your wallet first!");
-    return;
-  }
-
-  const input = document.getElementById(`transfer-${nftId}`);
-  const newOwner = input.value.trim();
-
-  if (!ethers.isAddress(newOwner)) {
-    alert("Invalid wallet address");
-    return;
-  }
-
-  try {
-    // $6 fee only
-    const feeUSD = 6;
-    const ethFee = feeUSD * 0.00032; // adjust with live price later
-    const ethAmount = ethers.parseEther(ethFee.toFixed(6).toString());
-
-    const tx = await signer.sendTransaction({
-      to: platformWallet,
-      value: ethAmount
-    });
-
-    await tx.wait();
-
-    // Update Supabase ownership
-    const { error } = await supabase
-      .from("nfts")
-      .update({
-        buyer_wallet: newOwner
-      })
-      .eq("id", nftId);
-
-    if (error) throw error;
-
-    alert(`✅ NFT transferred to ${newOwner}. Tx: ${tx.hash}`);
-    loadNFTs(); // refresh list
-  } catch (err) {
-    console.error(err);
-    alert("Transfer failed: " + err.message);
-  }
-}
-      
-
       // Add $6 platform fee
       const totalUSD = priceUSD + 6;
-
-      // For demo: $1 ≈ 0.00032 ETH  → adjust or use live price API later
-      const ethPrice = totalUSD * 0.00032;
+      const ethPrice = totalUSD * 0.00032; // rough USD→ETH estimate
       const ethAmount = ethers.parseEther(ethPrice.toFixed(6).toString());
 
       try {
@@ -151,7 +101,7 @@ async function transferNFT(nftId) {
 
         await tx.wait();
 
-        // Mark NFT as sold in Supabase
+        // Update Supabase NFT
         const { error } = await supabase
           .from("nfts")
           .update({
@@ -162,16 +112,60 @@ async function transferNFT(nftId) {
 
         if (error) throw error;
 
-        alert(`✅ NFT purchased! Transaction: ${tx.hash}`);
-        loadNFTs(); // refresh list
+        alert(`✅ NFT purchased! Tx: ${tx.hash}`);
+        loadNFTs();
       } catch (err) {
         console.error(err);
         alert("Transaction failed: " + err.message);
       }
     }
 
+    // ---- Transfer NFT ----
+    async function transferNFT(nftId) {
+      if (!signer) {
+        alert("Connect your wallet first!");
+        return;
+      }
+
+      const input = document.getElementById(`transfer-${nftId}`);
+      const newOwner = input.value.trim();
+
+      if (!ethers.isAddress(newOwner)) {
+        alert("Invalid wallet address");
+        return;
+      }
+
+      try {
+        const feeUSD = 6;
+        const ethFee = feeUSD * 0.00032;
+        const ethAmount = ethers.parseEther(ethFee.toFixed(6).toString());
+
+        const tx = await signer.sendTransaction({
+          to: platformWallet,
+          value: ethAmount
+        });
+
+        await tx.wait();
+
+        const { error } = await supabase
+          .from("nfts")
+          .update({
+            buyer_wallet: newOwner
+          })
+          .eq("id", nftId);
+
+        if (error) throw error;
+
+        alert(`✅ NFT transferred to ${newOwner}. Tx: ${tx.hash}`);
+        loadNFTs();
+      } catch (err) {
+        console.error(err);
+        alert("Transfer failed: " + err.message);
+      }
+    }
+
+    // Load NFTs immediately
     loadNFTs();
   </script>
 </body>
 </html>
-
