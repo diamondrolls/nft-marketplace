@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>NFT Marketplace</title>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="https://cdn.jsdelivr.net/npm/ethers@6.6.0/dist/ethers.min.js"></script>
+</head>
+<body>
+  <h1>NFT Marketplace</h1>
+
+  <button onclick="connectWallet()">🔗 Connect Wallet</button>
+  <div id="wallet-address"></div>
+
+  <div id="nft-list"></div>
+
+  <script>
+    // ---- Supabase Setup ----
+    const supabaseUrl = "https://YOUR-PROJECT-ID.supabase.co";
+    const supabaseKey = "YOUR-ANON-KEY";
+    const supabase = supabase.createClient(supabaseUrl, supabaseKey);
+
+    // ---- Wallet Setup ----
+    let provider, signer, userAddress;
+    const platformWallet = "0xYourPlatformWalletHere"; // where you collect fees/payments
+
+    async function connectWallet() {
+      if (window.ethereum) {
+        provider = new ethers.BrowserProvider(window.ethereum);
+        signer = await provider.getSigner();
+        userAddress = await signer.getAddress();
+        document.getElementById("wallet-address").innerText = "Connected: " + userAddress;
+      } else {
+        alert("Please install MetaMask!");
+      }
+    }
+
+    // ---- Load NFTs from Supabase ----
+    async function loadNFTs() {
+      const { data: nfts, error } = await supabase.from("nfts").select("*").eq("sold", false);
+      if (error) {
+        console.log(error);
+        return;
+      }
+      const container = document.getElementById("nft-list");
+      container.innerHTML = nfts.map(nft => `
+        <div style="border:1px solid #ddd; margin:10px; padding:10px; width:250px;">
+          <img src="${nft.image_url}" width="200"><br>
+          <b>${nft.name}</b><br>
+          $${nft.price}<br>
+          <button onclick="buyNFT(${nft.id}, ${nft.price})">Buy with MetaMask</button>
+        </div>
+      `).join("");
+    }
+
+    // ---- Buy NFT ----
+    async function buyNFT(nftId, priceUSD) {
+      if (!signer) {
+        alert("Connect your wallet first!");
+        return;
+      }
+
+      // Add $6 platform fee
+      const totalUSD = priceUSD + 6;
+
+      // For demo: $1 ≈ 0.00032 ETH  → adjust or use live price API later
+      const ethPrice = totalUSD * 0.00032;
+      const ethAmount = ethers.parseEther(ethPrice.toFixed(6).toString());
+
+      try {
+        // Send crypto payment
+        const tx = await signer.sendTransaction({
+          to: platformWallet,
+          value: ethAmount
+        });
+
+        await tx.wait();
+
+        // Mark NFT as sold in Supabase
+        const { error } = await supabase
+          .from("nfts")
+          .update({
+            sold: true,
+            buyer_wallet: userAddress
+          })
+          .eq("id", nftId);
+
+        if (error) throw error;
+
+        alert(`✅ NFT purchased! Transaction: ${tx.hash}`);
+        loadNFTs(); // refresh list
+      } catch (err) {
+        console.error(err);
+        alert("Transaction failed: " + err.message);
+      }
+    }
+
+    loadNFTs();
+  </script>
+</body>
+</html>
