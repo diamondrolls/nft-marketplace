@@ -5,22 +5,32 @@
   <title>NFT Marketplace</title>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdn.jsdelivr.net/npm/ethers@6.6.0/dist/ethers.min.js"></script>
+  <style>
+    body { font-family: sans-serif; margin: 20px; }
+    #nft-list { display: flex; flex-wrap: wrap; }
+    #nft-list > div { margin: 10px; }
+    #owned-nft-list li { margin-bottom: 15px; border:1px solid #ddd; padding:10px; width:250px; }
+    button { cursor: pointer; margin-top: 5px; }
+  </style>
 </head>
 <body>
   <h1>NFT Marketplace</h1>
-
   <button onclick="connectWallet()">🔗 Connect Wallet</button>
   <div id="wallet-address"></div>
 
+  <h2>My NFTs</h2>
+  <ul id="owned-nft-list" style="list-style:none; padding:0;"></ul>
+
+  <h2>Marketplace</h2>
   <div id="nft-list"></div>
 
   <script>
     // ---- Supabase Setup ----
     const supabaseUrl = "https://fjtzodjudyctqacunlqp.supabase.co";
-    const supabaseKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZqdHpvZGp1ZHljdHFhY3VubHFwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTgwNjA2OTQsImV4cCI6MjA3MzYzNjY5NH0.qR9RBsecfGUfKnbWgscmxloM-oEClJs_bo5YWoxFoE4";
+    const supabaseKey = "YOUR_SUPABASE_ANON_KEY";
     const supabase = supabase.createClient(supabaseUrl, supabaseKey);
 
-    // Redirect to login page if not logged in
+    // Redirect to login if not logged in
     supabase.auth.getSession().then(({ data }) => {
       if (!data.session) {
         window.location.href = 'https://diamondrolls.github.io/play/';
@@ -29,7 +39,7 @@
 
     // ---- Wallet Setup ----
     let provider, signer, userAddress;
-    const platformWallet = "0xaE0C180e071eE288B2F2f6ff6edaeF014678fFB7"; // where you collect fees/payments
+    const platformWallet = "0xaE0C180e071eE288B2F2f6ff6edaeF014678fFB7"; // fees go here
 
     async function connectWallet() {
       if (window.ethereum) {
@@ -37,7 +47,7 @@
         signer = await provider.getSigner();
         userAddress = await signer.getAddress();
         document.getElementById("wallet-address").innerText = "Connected: " + userAddress;
-        loadNFTs();
+        loadNFTs(); // refresh NFTs after wallet connects
       } else {
         alert("Please install MetaMask!");
       }
@@ -52,31 +62,42 @@
       }
 
       const container = document.getElementById("nft-list");
+      const ownedContainer = document.getElementById("owned-nft-list");
       container.innerHTML = "";
+      ownedContainer.innerHTML = "";
 
       for (const nft of nfts) {
-        let html = `
-          <div style="border:1px solid #ddd; margin:10px; padding:10px; width:250px;">
-            <img src="${nft.image_url}" width="200"><br>
+        const isOwner = nft.buyer_wallet?.toLowerCase() === userAddress?.toLowerCase();
+
+        if (isOwner) {
+          // Add to My NFTs
+          const li = document.createElement("li");
+          li.innerHTML = `
             <b>${nft.name}</b><br>
             $${nft.price}<br>
-        `;
-
-        if (!nft.sold) {
-          html += `<button onclick="buyNFT(${nft.id}, ${nft.price})">Buy with MetaMask</button>`;
-        } else if (nft.buyer_wallet?.toLowerCase() === userAddress?.toLowerCase()) {
-          html += `
-            <div>
-              <input id="transfer-${nft.id}" placeholder="Recipient wallet" style="width:90%; margin-top:6px;">
-              <button onclick="transferNFT(${nft.id})">Transfer ($6 fee)</button>
-            </div>
+            <img src="${nft.image_url}" width="150"><br>
+            <input id="transfer-${nft.id}" placeholder="Recipient wallet" style="width:90%; margin-top:6px;">
+            <button onclick="transferNFT(${nft.id})">Transfer ($6 fee)</button>
           `;
+          ownedContainer.appendChild(li);
         } else {
-          html += `<p style="color:gray;">Sold</p>`;
-        }
+          // Add to Marketplace grid
+          let html = `
+            <div style="border:1px solid #ddd; margin:10px; padding:10px; width:250px;">
+              <img src="${nft.image_url}" width="200"><br>
+              <b>${nft.name}</b><br>
+              $${nft.price}<br>
+          `;
 
-        html += "</div>";
-        container.innerHTML += html;
+          if (!nft.sold) {
+            html += `<button onclick="buyNFT(${nft.id}, ${nft.price})">Buy with MetaMask</button>`;
+          } else {
+            html += `<p style="color:gray;">Sold</p>`;
+          }
+
+          html += "</div>";
+          container.innerHTML += html;
+        }
       }
     }
 
@@ -87,31 +108,23 @@
         return;
       }
 
-      // Add $6 platform fee
-      const totalUSD = priceUSD + 6;
-      const ethPrice = totalUSD * 0.00032; // rough USD→ETH estimate
+      const totalUSD = priceUSD + 6; // $6 fee
+      const ethPrice = totalUSD * 0.00032; // rough USD→ETH
       const ethAmount = ethers.parseEther(ethPrice.toFixed(6).toString());
 
       try {
-        // Send crypto payment
         const tx = await signer.sendTransaction({
           to: platformWallet,
           value: ethAmount
         });
-
         await tx.wait();
 
-        // Update Supabase NFT
         const { error } = await supabase
           .from("nfts")
-          .update({
-            sold: true,
-            buyer_wallet: userAddress
-          })
+          .update({ sold: true, buyer_wallet: userAddress })
           .eq("id", nftId);
 
         if (error) throw error;
-
         alert(`✅ NFT purchased! Tx: ${tx.hash}`);
         loadNFTs();
       } catch (err) {
@@ -144,18 +157,14 @@
           to: platformWallet,
           value: ethAmount
         });
-
         await tx.wait();
 
         const { error } = await supabase
           .from("nfts")
-          .update({
-            buyer_wallet: newOwner
-          })
+          .update({ buyer_wallet: newOwner })
           .eq("id", nftId);
 
         if (error) throw error;
-
         alert(`✅ NFT transferred to ${newOwner}. Tx: ${tx.hash}`);
         loadNFTs();
       } catch (err) {
@@ -164,7 +173,7 @@
       }
     }
 
-    // Load NFTs immediately
+    // Load NFTs immediately (for non-wallet view)
     loadNFTs();
   </script>
 </body>
