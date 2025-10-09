@@ -88,6 +88,53 @@ async function loadNFTs() {
         return;
       }
 
+      // ---- Transfer NFT ----
+async function transferNFT(nftId) {
+  if (!signer) {
+    alert("Connect your wallet first!");
+    return;
+  }
+
+  const input = document.getElementById(`transfer-${nftId}`);
+  const newOwner = input.value.trim();
+
+  if (!ethers.isAddress(newOwner)) {
+    alert("Invalid wallet address");
+    return;
+  }
+
+  try {
+    // $6 fee only
+    const feeUSD = 6;
+    const ethFee = feeUSD * 0.00032; // adjust with live price later
+    const ethAmount = ethers.parseEther(ethFee.toFixed(6).toString());
+
+    const tx = await signer.sendTransaction({
+      to: platformWallet,
+      value: ethAmount
+    });
+
+    await tx.wait();
+
+    // Update Supabase ownership
+    const { error } = await supabase
+      .from("nfts")
+      .update({
+        buyer_wallet: newOwner
+      })
+      .eq("id", nftId);
+
+    if (error) throw error;
+
+    alert(`✅ NFT transferred to ${newOwner}. Tx: ${tx.hash}`);
+    loadNFTs(); // refresh list
+  } catch (err) {
+    console.error(err);
+    alert("Transfer failed: " + err.message);
+  }
+}
+      
+
       // Add $6 platform fee
       const totalUSD = priceUSD + 6;
 
