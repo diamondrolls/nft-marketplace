@@ -109,5 +109,68 @@
             $${nft.price}<br>
             <img src="${nft.image_url}" width="150"><br>
             <input id="transfer-${nft.id}" placeholder="Recipient wallet">
-            <button onclick="tr
-    
+            <button onclick="transferNFT(${nft.id}, ${ethToUsdRate})">Transfer ($6 fee)</button>
+          `;
+          myNFTs.appendChild(li);
+        }
+
+        // Marketplace section
+        const card = document.createElement("div");
+        card.className = "nft-card";
+        card.innerHTML = `
+          <img src="${nft.image_url}" alt="${nft.name}">
+          <b>${nft.name}</b><br>
+          $${nft.price}<br>
+        `;
+        if (!nft.sold) {
+          card.innerHTML += `<button onclick="buyNFT(${nft.id}, ${nft.price}, ${ethToUsdRate})">Buy</button>`;
+        } else {
+          card.innerHTML += `<p style="color:gray;">Sold</p>`;
+        }
+        market.appendChild(card);
+      }
+    }
+
+    // 🔹 Buy NFT
+    async function buyNFT(nftId, priceUSD, ethToUsdRate) {
+      if (!signer) return alert("Connect wallet first!");
+      const ethAmount = ethers.parseEther(((priceUSD + 6) / ethToUsdRate).toFixed(6));
+      const tx = await signer.sendTransaction({ to: platformWallet, value: ethAmount });
+      await tx.wait();
+
+      const { error } = await supabase.from("nfts")
+        .update({ sold: true, buyer_wallet: userAddress })
+        .eq("id", nftId);
+      if (error) console.error(error);
+      loadNFTs();
+    }
+
+    // 🔹 Transfer NFT
+    async function transferNFT(nftId, ethToUsdRate) {
+      if (!signer) return alert("Connect wallet first!");
+      const newOwner = document.getElementById(`transfer-${nftId}`).value.trim();
+      if (!ethers.isAddress(newOwner)) return alert("Invalid wallet address");
+
+      const ethAmount = ethers.parseEther((6 / ethToUsdRate).toFixed(6));
+      const tx = await signer.sendTransaction({ to: platformWallet, value: ethAmount });
+      await tx.wait();
+
+      const { error } = await supabase.from("nfts")
+        .update({ buyer_wallet: newOwner })
+        .eq("id", nftId);
+      if (error) console.error(error);
+      loadNFTs();
+    }
+
+    // 🔹 Initialize
+    (async () => {
+      await checkLogin();
+      if (web3Modal.cachedProvider) {
+        await connectWallet();
+      } else {
+        loadNFTs(); // show marketplace even if wallet not connected
+      }
+    })();
+  </script>
+</body>
+</html>
