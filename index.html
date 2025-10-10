@@ -1,86 +1,167 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>NFT Marketplace</title>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdn.jsdelivr.net/npm/ethers@6.6.0/dist/ethers.min.js"></script>
   <script src="https://unpkg.com/web3modal@2.7.9/dist/index.js"></script>
   <script src="https://unpkg.com/@walletconnect/web3-provider@1.8.0/dist/umd/index.min.js"></script>
+
   <style>
     body {
-      font-family: sans-serif;
-      margin: 20px;
-      background: #f5f5f5;
+      font-family: system-ui, sans-serif;
+      background: #f9fafb;
+      margin: 0;
+      padding: 10px;
     }
+
+    header {
+      text-align: center;
+      padding: 15px;
+      background: white;
+      border-bottom: 1px solid #ddd;
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 1.5rem;
+    }
+
     button {
       cursor: pointer;
-      padding: 8px 16px;
-      border-radius: 6px;
       border: none;
+      border-radius: 8px;
+      padding: 12px 20px;
       background: #0070f3;
       color: white;
-      margin: 5px;
+      font-weight: 600;
+      font-size: 1rem;
+      transition: 0.2s;
     }
+
     button:hover {
       background: #005bb5;
     }
-    .nft-card {
-      border: 1px solid #ddd;
-      border-radius: 8px;
-      background: white;
-      padding: 10px;
-      margin: 10px;
-      display: inline-block;
-      width: 220px;
-      vertical-align: top;
-      text-align: center;
-      box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+
+    section {
+      margin-top: 20px;
     }
+
+    h2 {
+      font-size: 1.2rem;
+      border-left: 4px solid #0070f3;
+      padding-left: 8px;
+    }
+
+    .nft-list {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+      gap: 12px;
+      margin-top: 10px;
+    }
+
+    .nft-card {
+      background: white;
+      border-radius: 10px;
+      padding: 10px;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
+      text-align: center;
+    }
+
     .nft-card img {
-      width: 200px;
-      height: 200px;
+      width: 100%;
+      height: 160px;
       object-fit: cover;
       border-radius: 8px;
     }
+
+    .nft-card h3 {
+      font-size: 1rem;
+      margin: 8px 0 4px;
+    }
+
+    .nft-card p {
+      margin: 4px 0;
+      color: #444;
+      font-size: 0.9rem;
+    }
+
+    input.transfer-input {
+      width: 90%;
+      padding: 6px;
+      border: 1px solid #ccc;
+      border-radius: 8px;
+      margin-top: 5px;
+      font-size: 0.9rem;
+    }
+
+    #wallet-address {
+      margin-top: 10px;
+      font-size: 0.9rem;
+      word-break: break-all;
+      color: #0070f3;
+    }
+
+    footer {
+      text-align: center;
+      color: #666;
+      padding: 15px;
+      font-size: 0.8rem;
+      margin-top: 30px;
+    }
   </style>
 </head>
+
 <body>
-  <h1>NFT Marketplace</h1>
-  <button onclick="connectWallet()">🔗 Connect Wallet</button>
-  <div id="wallet-address"></div>
+  <header>
+    <h1>💎 NFT Marketplace</h1>
+    <button onclick="connectWallet()">🔗 Connect Wallet</button>
+    <div id="wallet-address"></div>
+  </header>
 
-  <h2>My NFTs</h2>
-  <div id="my-nfts-list"></div>
+  <section>
+    <h2>My NFTs</h2>
+    <div class="nft-list" id="my-nfts-list"></div>
+  </section>
 
-  <h2>Marketplace</h2>
-  <div id="marketplace-list"></div>
+  <section>
+    <h2>Marketplace</h2>
+    <div class="nft-list" id="marketplace-list"></div>
+  </section>
 
-  <h2>Sold NFTs</h2>
-  <div id="sold-list"></div>
+  <section>
+    <h2>Sold NFTs</h2>
+    <div class="nft-list" id="sold-list"></div>
+  </section>
+
+  <footer>
+    Powered by Supabase ⚡ and Ethereum 🔗
+  </footer>
 
   <script>
-    // === Supabase Setup ===
     const supabaseUrl = "https://fjtzodjudyctqacunlqp.supabase.co";
     const supabaseKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZqdHpvZGp1ZHljdHFhY3VubHFwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTgwNjA2OTQsImV4cCI6MjA3MzYzNjY5NH0.qR9RBsecfGUfKnbWgscmxloM-oEClJs_bo5YWoxFoE4";
     const supabase = supabase.createClient(supabaseUrl, supabaseKey);
 
-    // === Web3Modal Setup ===
-    let provider, signer, userAddress;
     const providerOptions = {
       walletconnect: {
         package: window.WalletConnectProvider.default,
-        options: {
-          infuraId: "d71dd33696d449e488a88bdc02a6093c" // ✅ your Infura key
-        }
+        options: { infuraId: "d71dd33696d449e488a88bdc02a6093c" }
       }
     };
+
     const web3Modal = new window.Web3Modal.default({
       cacheProvider: true,
       providerOptions
     });
 
-    // === Redirect if not logged in ===
+    let provider, signer, userAddress;
+
     async function checkLogin() {
       const { data, error } = await supabase.auth.getUser();
       if (error || !data.user) {
@@ -88,23 +169,20 @@
       }
     }
 
-    // === Connect Wallet ===
     async function connectWallet() {
       try {
         const instance = await web3Modal.connect();
         provider = new ethers.BrowserProvider(instance);
         signer = await provider.getSigner();
         userAddress = (await signer.getAddress()).toLowerCase();
-
         document.getElementById("wallet-address").innerText = "Connected: " + userAddress;
         loadNFTs();
       } catch (err) {
-        console.error("Wallet connection failed:", err);
-        alert("Wallet connection failed: " + err.message);
+        alert("Wallet connection failed");
+        console.error(err);
       }
     }
 
-    // === Load NFTs from Supabase ===
     async function loadNFTs() {
       const { data: nfts, error } = await supabase
         .from("nfts")
@@ -112,45 +190,79 @@
         .order("created_at", { ascending: false });
 
       if (error) {
-        console.error("Error loading NFTs:", error);
+        console.error(error);
         return;
       }
 
       const myList = document.getElementById("my-nfts-list");
       const marketList = document.getElementById("marketplace-list");
       const soldList = document.getElementById("sold-list");
-
-      myList.innerHTML = "";
-      marketList.innerHTML = "";
-      soldList.innerHTML = "";
+      myList.innerHTML = marketList.innerHTML = soldList.innerHTML = "";
 
       for (const nft of nfts) {
         const isOwner = nft.buyer_wallet?.toLowerCase() === userAddress;
-        const html = `
-          <div class="nft-card">
-            <img src="${nft.image_url}" alt="${nft.name}">
-            <h3>${nft.name}</h3>
-            <p>$${nft.price}</p>
-            ${nft.sold ? "<p style='color:gray;'>Sold</p>" : ""}
-          </div>
+        const card = document.createElement("div");
+        card.className = "nft-card";
+        card.innerHTML = `
+          <img src="${nft.image_url}" alt="${nft.name}">
+          <h3>${nft.name}</h3>
+          <p>$${nft.price}</p>
+          ${nft.sold ? "<p style='color:gray;'>Sold</p>" : ""}
         `;
 
-        if (isOwner) {
-          myList.innerHTML += html;
-        } else if (!nft.sold) {
-          marketList.innerHTML += html;
-        } else {
-          soldList.innerHTML += html;
+        if (!nft.sold) {
+          const buyBtn = document.createElement("button");
+          buyBtn.textContent = "🛒 Buy";
+          buyBtn.onclick = () => buyNFT(nft);
+          card.appendChild(buyBtn);
         }
+
+        if (isOwner && !nft.sold) {
+          const input = document.createElement("input");
+          input.placeholder = "Recipient wallet";
+          input.className = "transfer-input";
+          const transferBtn = document.createElement("button");
+          transferBtn.textContent = "🔄 Transfer";
+          transferBtn.onclick = () => transferNFT(nft, input.value);
+          card.appendChild(input);
+          card.appendChild(transferBtn);
+        }
+
+        if (isOwner) myList.appendChild(card);
+        else if (!nft.sold) marketList.appendChild(card);
+        else soldList.appendChild(card);
       }
     }
 
-    // === Auto-connect if cached ===
-    if (web3Modal.cachedProvider) {
-      connectWallet();
+    async function buyNFT(nft) {
+      if (!signer) return alert("Connect wallet first!");
+      try {
+        const tx = await signer.sendTransaction({
+          to: nft.seller_wallet,
+          value: ethers.parseEther(String(nft.price))
+        });
+        await tx.wait();
+        await supabase.from("nfts").update({
+          sold: true,
+          buyer_wallet: userAddress
+        }).eq("id", nft.id);
+        alert("NFT purchased!");
+        loadNFTs();
+      } catch (err) {
+        alert("Transaction failed: " + err.message);
+      }
     }
 
-    // === Run auth check on page load ===
+    async function transferNFT(nft, recipient) {
+      if (!recipient) return alert("Enter a wallet address.");
+      await supabase.from("nfts").update({
+        buyer_wallet: recipient
+      }).eq("id", nft.id);
+      alert("NFT transferred!");
+      loadNFTs();
+    }
+
+    if (web3Modal.cachedProvider) connectWallet();
     checkLogin();
   </script>
 </body>
