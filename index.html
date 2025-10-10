@@ -8,11 +8,41 @@
   <script src="https://unpkg.com/web3modal@2.7.9/dist/index.js"></script>
   <script src="https://unpkg.com/@walletconnect/web3-provider@1.8.0/dist/umd/index.min.js"></script>
   <style>
-    body { font-family: sans-serif; margin: 20px; background: #f5f5f5; }
-    button { cursor: pointer; padding: 6px 12px; border-radius: 6px; border: none; background: #0070f3; color: white; margin: 5px; }
-    button:hover { background: #005bb5; }
-    .nft-card { border: 1px solid #ddd; padding: 10px; margin: 10px; background: white; border-radius: 10px; width: 220px; display: inline-block; vertical-align: top; }
-    .nft-card img { width: 200px; border-radius: 8px; }
+    body {
+      font-family: sans-serif;
+      margin: 20px;
+      background: #f5f5f5;
+    }
+    button {
+      cursor: pointer;
+      padding: 8px 16px;
+      border-radius: 6px;
+      border: none;
+      background: #0070f3;
+      color: white;
+      margin: 5px;
+    }
+    button:hover {
+      background: #005bb5;
+    }
+    .nft-card {
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      background: white;
+      padding: 10px;
+      margin: 10px;
+      display: inline-block;
+      width: 220px;
+      vertical-align: top;
+      text-align: center;
+      box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+    }
+    .nft-card img {
+      width: 200px;
+      height: 200px;
+      object-fit: cover;
+      border-radius: 8px;
+    }
   </style>
 </head>
 <body>
@@ -21,156 +51,107 @@
   <div id="wallet-address"></div>
 
   <h2>My NFTs</h2>
-  <ul id="my-nfts-list"></ul>
+  <div id="my-nfts-list"></div>
 
   <h2>Marketplace</h2>
-  <div id="nft-list"></div>
+  <div id="marketplace-list"></div>
+
+  <h2>Sold NFTs</h2>
+  <div id="sold-list"></div>
 
   <script>
-    // 🔹 Supabase Setup
+    // === Supabase Setup ===
     const supabaseUrl = "https://fjtzodjudyctqacunlqp.supabase.co";
     const supabaseKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZqdHpvZGp1ZHljdHFhY3VubHFwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTgwNjA2OTQsImV4cCI6MjA3MzYzNjY5NH0.qR9RBsecfGUfKnbWgscmxloM-oEClJs_bo5YWoxFoE4";
     const supabase = supabase.createClient(supabaseUrl, supabaseKey);
 
-    // 🔹 Wallet Setup
+    // === Web3Modal Setup ===
     let provider, signer, userAddress;
-    const platformWallet = "0xaE0C180e071eE288B2F2f6ff6edaeF014678fFB7";
-    let web3Modal;
-
     const providerOptions = {
       walletconnect: {
         package: window.WalletConnectProvider.default,
         options: {
-          infuraId: "d71dd33696d449e488a88bdc02a6093c" // ✅ your Infura Project ID
+          infuraId: "d71dd33696d449e488a88bdc02a6093c" // ✅ your Infura key
         }
       }
     };
-
-    web3Modal = new window.Web3Modal.default({
+    const web3Modal = new window.Web3Modal.default({
       cacheProvider: true,
       providerOptions
     });
 
-    // 🔹 Redirect if not logged in
+    // === Redirect if not logged in ===
     async function checkLogin() {
-      const { data: { user }, error } = await supabase.auth.getUser();
-      if (error || !user) {
-        // redirect to login page
-        window.location.href = "https://diamondrolls.github.io/play/signup.html"; 
+      const { data, error } = await supabase.auth.getUser();
+      if (error || !data.user) {
+        window.location.href = "https://diamondrolls.github.io/play/";
       }
     }
 
-    // 🔹 Fetch ETH to USD
-    async function fetchEthToUsdRate() {
-      try {
-        const response = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd');
-        const data = await response.json();
-        return data.ethereum.usd;
-      } catch (err) {
-        console.error("ETH price fetch failed:", err);
-        return 3500;
-      }
-    }
-
-    // 🔹 Connect Wallet
+    // === Connect Wallet ===
     async function connectWallet() {
       try {
         const instance = await web3Modal.connect();
         provider = new ethers.BrowserProvider(instance);
         signer = await provider.getSigner();
-        userAddress = await signer.getAddress();
+        userAddress = (await signer.getAddress()).toLowerCase();
+
         document.getElementById("wallet-address").innerText = "Connected: " + userAddress;
         loadNFTs();
       } catch (err) {
+        console.error("Wallet connection failed:", err);
         alert("Wallet connection failed: " + err.message);
       }
     }
 
-    // 🔹 Load NFTs
+    // === Load NFTs from Supabase ===
     async function loadNFTs() {
-      const { data: nfts, error } = await supabase.from("nfts").select("*");
-      if (error) return console.error(error);
+      const { data: nfts, error } = await supabase
+        .from("nfts")
+        .select("*")
+        .order("created_at", { ascending: false });
 
-      const market = document.getElementById("nft-list");
-      const myNFTs = document.getElementById("my-nfts-list");
-      market.innerHTML = "";
-      myNFTs.innerHTML = "";
+      if (error) {
+        console.error("Error loading NFTs:", error);
+        return;
+      }
 
-      const ethToUsdRate = await fetchEthToUsdRate();
+      const myList = document.getElementById("my-nfts-list");
+      const marketList = document.getElementById("marketplace-list");
+      const soldList = document.getElementById("sold-list");
+
+      myList.innerHTML = "";
+      marketList.innerHTML = "";
+      soldList.innerHTML = "";
 
       for (const nft of nfts) {
-        const isOwner = userAddress && nft.buyer_wallet?.toLowerCase() === userAddress.toLowerCase();
-
-        // My NFTs section
-        if (isOwner) {
-          const li = document.createElement("li");
-          li.innerHTML = `
-            <b>${nft.name}</b><br>
-            $${nft.price}<br>
-            <img src="${nft.image_url}" width="150"><br>
-            <input id="transfer-${nft.id}" placeholder="Recipient wallet">
-            <button onclick="transferNFT(${nft.id}, ${ethToUsdRate})">Transfer ($6 fee)</button>
-          `;
-          myNFTs.appendChild(li);
-        }
-
-        // Marketplace section
-        const card = document.createElement("div");
-        card.className = "nft-card";
-        card.innerHTML = `
-          <img src="${nft.image_url}" alt="${nft.name}">
-          <b>${nft.name}</b><br>
-          $${nft.price}<br>
+        const isOwner = nft.buyer_wallet?.toLowerCase() === userAddress;
+        const html = `
+          <div class="nft-card">
+            <img src="${nft.image_url}" alt="${nft.name}">
+            <h3>${nft.name}</h3>
+            <p>$${nft.price}</p>
+            ${nft.sold ? "<p style='color:gray;'>Sold</p>" : ""}
+          </div>
         `;
-        if (!nft.sold) {
-          card.innerHTML += `<button onclick="buyNFT(${nft.id}, ${nft.price}, ${ethToUsdRate})">Buy</button>`;
+
+        if (isOwner) {
+          myList.innerHTML += html;
+        } else if (!nft.sold) {
+          marketList.innerHTML += html;
         } else {
-          card.innerHTML += `<p style="color:gray;">Sold</p>`;
+          soldList.innerHTML += html;
         }
-        market.appendChild(card);
       }
     }
 
-    // 🔹 Buy NFT
-    async function buyNFT(nftId, priceUSD, ethToUsdRate) {
-      if (!signer) return alert("Connect wallet first!");
-      const ethAmount = ethers.parseEther(((priceUSD + 6) / ethToUsdRate).toFixed(6));
-      const tx = await signer.sendTransaction({ to: platformWallet, value: ethAmount });
-      await tx.wait();
-
-      const { error } = await supabase.from("nfts")
-        .update({ sold: true, buyer_wallet: userAddress })
-        .eq("id", nftId);
-      if (error) console.error(error);
-      loadNFTs();
+    // === Auto-connect if cached ===
+    if (web3Modal.cachedProvider) {
+      connectWallet();
     }
 
-    // 🔹 Transfer NFT
-    async function transferNFT(nftId, ethToUsdRate) {
-      if (!signer) return alert("Connect wallet first!");
-      const newOwner = document.getElementById(`transfer-${nftId}`).value.trim();
-      if (!ethers.isAddress(newOwner)) return alert("Invalid wallet address");
-
-      const ethAmount = ethers.parseEther((6 / ethToUsdRate).toFixed(6));
-      const tx = await signer.sendTransaction({ to: platformWallet, value: ethAmount });
-      await tx.wait();
-
-      const { error } = await supabase.from("nfts")
-        .update({ buyer_wallet: newOwner })
-        .eq("id", nftId);
-      if (error) console.error(error);
-      loadNFTs();
-    }
-
-    // 🔹 Initialize
-    (async () => {
-      await checkLogin();
-      if (web3Modal.cachedProvider) {
-        await connectWallet();
-      } else {
-        loadNFTs(); // show marketplace even if wallet not connected
-      }
-    })();
+    // === Run auth check on page load ===
+    checkLogin();
   </script>
 </body>
 </html>
