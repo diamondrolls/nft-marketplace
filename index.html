@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>NFT Marketplace</title>
+  <title>💎 NFT Marketplace</title>
 
   <!-- Supabase & Ethers -->
   <script src="https://unpkg.com/@supabase/supabase-js"></script>
@@ -17,15 +17,18 @@
       padding: 0;
     }
     header {
-      text-align: center;
       background: white;
+      text-align: center;
       padding: 16px;
       position: sticky;
       top: 0;
       border-bottom: 1px solid #ddd;
       z-index: 10;
     }
-    h1 { font-size: 1.6rem; margin: 0; }
+    h1 {
+      font-size: 1.6rem;
+      margin: 0;
+    }
     button {
       cursor: pointer;
       border: none;
@@ -38,17 +41,74 @@
       transition: all 0.2s;
     }
     button:hover { background: #005bb5; }
-    #wallet-address { font-size: 0.9rem; color: #0070f3; word-break: break-all; margin-top: 8px; }
-    main { padding: 20px; }
-    .nft-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 20px; }
-    .nft-card { position: relative; background: white; border-radius: 12px; overflow: hidden; box-shadow: 0 3px 8px rgba(0,0,0,0.1); transition: transform 0.2s; }
-    .nft-card:hover { transform: scale(1.02); }
-    .nft-card img { width: 100%; height: 200px; object-fit: cover; display: block; }
-    .nft-info { padding: 10px; text-align: center; }
-    .nft-info h3 { font-size: 23px; margin: 8px 0 0; }
-    .button-panel { max-height: 0; overflow: hidden; background: #f0f0f0; transition: max-height 0.3s ease-in-out; text-align: center; padding: 0; }
-    .nft-card.active .button-panel { max-height: 150px; padding: 10px; }
-    .button-panel button { display: block; width: 100%; margin: 5px 0; font-size: 1rem; }
+    #wallet-address {
+      font-size: 0.9rem;
+      color: #0070f3;
+      word-break: break-all;
+      margin-top: 8px;
+    }
+
+    main {
+      padding: 20px;
+    }
+    h2 {
+      text-align: center;
+      font-size: 1.4rem;
+    }
+
+    .nft-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 20px;
+      margin-top: 20px;
+    }
+    .nft-card {
+      position: relative;
+      background: white;
+      border-radius: 12px;
+      overflow: hidden;
+      box-shadow: 0 3px 8px rgba(0, 0, 0, 0.1);
+      transition: transform 0.2s ease;
+    }
+    .nft-card:hover {
+      transform: scale(1.02);
+    }
+    .nft-card img {
+      width: 100%;
+      height: 220px;
+      object-fit: cover;
+      display: block;
+    }
+    .nft-info {
+      padding: 12px;
+      text-align: center;
+    }
+    .nft-info h3 {
+      font-size: 20px;
+      margin: 8px 0 0;
+    }
+    .nft-info p {
+      margin: 4px 0;
+    }
+
+    .button-panel {
+      max-height: 0;
+      overflow: hidden;
+      background: #f0f0f0;
+      transition: max-height 0.3s ease-in-out;
+      text-align: center;
+      padding: 0;
+    }
+    .nft-card.active .button-panel {
+      max-height: 150px;
+      padding: 10px;
+    }
+    .button-panel button {
+      display: block;
+      width: 100%;
+      margin: 6px 0;
+      font-size: 1rem;
+    }
   </style>
 </head>
 <body>
@@ -59,20 +119,21 @@
   </header>
 
   <main>
-    <h2>All NFTs</h2>
-    <div class="nft-grid" id="nft-grid"></div>
+    <h2>Explore NFTs</h2>
+    <div class="nft-grid" id="nft-grid">
+      <p style="text-align:center;">Loading NFTs...</p>
+    </div>
   </main>
 
   <script>
-    // ---------- Supabase setup ----------
+    // ---------- Supabase Setup ----------
     const supabaseUrl = "https://fjtzodjudyctqacunlqp.supabase.co";
     const supabaseKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZqdHpvZGp1ZHljdHFhY3VubHFwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTgwNjA2OTQsImV4cCI6MjA3MzYzNjY5NH0.qR9RBsecfGUfKnbWgscmxloM-oEClJs_bo5YWoxFoE4";
-    const supabase = supabase.createClient(supabaseUrl, supabaseKey);
+    const supabaseClient = supabase.createClient(supabaseUrl, supabaseKey);
 
-    // ---------- Blockchain / MetaMask setup ----------
+    // ---------- MetaMask / Blockchain ----------
     let provider, signer, userAddress;
-    const CONTRACT_ADDRESS = "0xd9145CCE52D386f254917e481eB44e9943F39138";
-    const FEE_WALLET = "0xaE0C180e071eE288B2F2f6ff6edaeF014678fFB7"; // <-- replace with your wallet for $6 fee
+    const FEE_WALLET = "0xaE0C180e071eE288B2F2f6ff6edaeF014678fFB7"; // Your $6 fee wallet
 
     async function connectWallet() {
       if (!window.ethereum) return alert("Please install MetaMask!");
@@ -83,37 +144,51 @@
       loadNFTs();
     }
 
-    // ---------- Load ALL NFTs from Supabase ----------
+    // ---------- Load NFTs from Supabase ----------
     async function loadNFTs() {
-      const { data, error } = await supabase.from("nfts").select("*");
+      const { data: nfts, error } = await supabaseClient
+        .from("nfts")
+        .select("id, description, collection, image_url, price_usd, owner_wallet, is_for_sale, token_id, price")
+        .order("created_at", { ascending: false });
+
       if (error) {
         console.error("Supabase error:", error);
+        document.getElementById("nft-grid").innerHTML = "<p style='color:red;'>Error loading NFTs.</p>";
         return;
       }
-      renderNFTs(data);
+
+      renderNFTs(nfts);
     }
 
-    // ---------- Render NFTs ----------
+    // ---------- Render NFT Cards ----------
     function renderNFTs(nfts) {
       const grid = document.getElementById("nft-grid");
       grid.innerHTML = "";
 
       if (!nfts || nfts.length === 0) {
-        grid.innerHTML = "<p>No NFTs found.</p>";
+        grid.innerHTML = "<p style='text-align:center;'>No NFTs found.</p>";
         return;
       }
 
       nfts.forEach(nft => {
+        const priceLabel = nft.price ? `${nft.price} ETH` : nft.price_usd ? `$${nft.price_usd}` : "N/A";
+        const saleStatus = nft.is_for_sale ? "For Sale ✅" : "Not for Sale ❌";
+
         const card = document.createElement("div");
         card.className = "nft-card";
         card.innerHTML = `
-          <img src="${nft.image_url}" alt="${nft.name}" />
-          <div class="nft-info"><h3>${nft.name || "NFT"} (#${nft.token_id})</h3></div>
+          <img src="${nft.image_url}" alt="${nft.collection}" />
+          <div class="nft-info">
+            <h3>${nft.collection || "Unnamed Collection"}</h3>
+            <p>${nft.description || ""}</p>
+            <p><strong>${priceLabel}</strong></p>
+            <p style="color:gray;font-size:0.9rem;">${saleStatus}</p>
+          </div>
           <div class="button-panel">
             ${
-              !nft.sold
-                ? `<button onclick="buyNFT(${nft.token_id}, ${nft.price})">🛒 Buy ($${nft.price})</button>`
-                : `<button disabled>Sold</button>`
+              nft.is_for_sale
+                ? `<button onclick="buyNFT('${nft.id}', ${nft.token_id}, '${nft.price}')">🛒 Buy (${priceLabel})</button>`
+                : `<button disabled style="opacity:0.5;">Not for Sale</button>`
             }
             <button onclick="promptTransfer(${nft.token_id})">🔄 Transfer</button>
           </div>
@@ -126,52 +201,19 @@
       });
     }
 
-    // ---------- Buy NFT ----------
-    async function buyNFT(tokenId, price) {
-      if (!signer) return alert("Connect wallet first!");
-
-      const { data: nft, error } = await supabase.from("nfts").select("*").eq("token_id", tokenId).single();
-      if (error || !nft) return alert("NFT not found!");
-
-      const totalPrice = parseFloat(price) + 6; // add $6 fee
-
-      try {
-        // Send $6 fee to you
-        const feeTx = await signer.sendTransaction({
-          to: FEE_WALLET,
-          value: ethers.parseEther("6")
-        });
-        await feeTx.wait();
-
-        // Send NFT price to seller
-        const buyTx = await signer.sendTransaction({
-          to: nft.seller_wallet,
-          value: ethers.parseEther(String(nft.price))
-        });
-        await buyTx.wait();
-
-        // Update Supabase
-        await supabase.from("nfts").update({ sold: true, buyer_wallet: userAddress }).eq("token_id", tokenId);
-        alert("NFT purchased successfully!");
-        loadNFTs();
-      } catch (err) {
-        console.error(err);
-        alert("Transaction failed: " + err.message);
-      }
+    // ---------- Buy NFT Placeholder ----------
+    async function buyNFT(uuid, tokenId, price) {
+      alert(`Buy logic goes here:\nUUID: ${uuid}\nToken ID: ${tokenId}\nPrice: ${price || "N/A"}\nFee: $6 to ${FEE_WALLET}`);
+      // Future: Ethereum smart contract + $6 fee integration
     }
 
-    // ---------- Transfer NFT ----------
-    async function promptTransfer(tokenId) {
-      const recipient = prompt("Enter recipient wallet address:");
-      if (!recipient) return;
-      const { error } = await supabase.from("nfts").update({ buyer_wallet: recipient }).eq("token_id", tokenId);
-      if (error) console.error(error);
-      else alert("NFT transferred!");
-      loadNFTs();
+    // ---------- Transfer NFT Placeholder ----------
+    function promptTransfer(tokenId) {
+      const newAddress = prompt("Enter wallet address to transfer NFT #" + tokenId + ":");
+      if (!newAddress) return;
+      alert(`Transfer logic will go here for token #${tokenId} → ${newAddress}`);
     }
-
-    // Load NFTs on page open (even before connecting wallet)
-    loadNFTs();
   </script>
 </body>
 </html>
+
