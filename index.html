@@ -8,7 +8,7 @@
   <!-- Supabase & Ethers -->
   <script src="https://unpkg.com/@supabase/supabase-js"></script>
   <script src="https://cdn.jsdelivr.net/npm/ethers@6/dist/ethers.min.js"></script>
-  
+
   <style>
     body {
       font-family: system-ui, sans-serif;
@@ -59,7 +59,7 @@
   </header>
 
   <main>
-    <h2>Your NFTs</h2>
+    <h2>All NFTs</h2>
     <div class="nft-grid" id="nft-grid"></div>
   </main>
 
@@ -72,10 +72,7 @@
     // ---------- Blockchain / MetaMask setup ----------
     let provider, signer, userAddress;
     const CONTRACT_ADDRESS = "0xd9145CCE52D386f254917e481eB44e9943F39138";
-    const abi = [
-      "function balanceOf(address owner) view returns (uint256)",
-      "function tokenOfOwnerByIndex(address owner, uint256 index) view returns (uint256)"
-    ];
+    const FEE_WALLET = "0xaE0C180e071eE288B2F2f6ff6edaeF014678fFB7"; // <-- replace with your wallet for $6 fee
 
     async function connectWallet() {
       if (!window.ethereum) return alert("Please install MetaMask!");
@@ -86,41 +83,36 @@
       loadNFTs();
     }
 
-    async function getOwnedNFTs(wallet) {
-      const contract = new ethers.Contract(contractAddress, abi, provider);
-      const balance = await contract.balanceOf(wallet);
-      const tokenIds = [];
-      for (let i = 0; i < balance; i++) {
-        const tokenId = await contract.tokenOfOwnerByIndex(wallet, i);
-        tokenIds.push(tokenId.toString());
+    // ---------- Load ALL NFTs from Supabase ----------
+    async function loadNFTs() {
+      const { data, error } = await supabase.from("nfts").select("*");
+      if (error) {
+        console.error("Supabase error:", error);
+        return;
       }
-      return tokenIds;
+      renderNFTs(data);
     }
 
-    async function getNFTMetadata(tokenIds) {
-      if (tokenIds.length === 0) return [];
-      const { data, error } = await supabase
-        .from("nfts")
-        .select("*")
-        .in("token_id", tokenIds);
-      if (error) console.error(error);
-      return data || [];
-    }
-
+    // ---------- Render NFTs ----------
     function renderNFTs(nfts) {
       const grid = document.getElementById("nft-grid");
       grid.innerHTML = "";
+
+      if (!nfts || nfts.length === 0) {
+        grid.innerHTML = "<p>No NFTs found.</p>";
+        return;
+      }
 
       nfts.forEach(nft => {
         const card = document.createElement("div");
         card.className = "nft-card";
         card.innerHTML = `
           <img src="${nft.image_url}" alt="${nft.name}" />
-          <div class="nft-info"><h3>${nft.name} (#${nft.token_id})</h3></div>
+          <div class="nft-info"><h3>${nft.name || "NFT"} (#${nft.token_id})</h3></div>
           <div class="button-panel">
             ${
               !nft.sold
-                ? `<button onclick="buyNFT(${nft.token_id})">🛒 Buy ($${nft.price})</button>`
+                ? `<button onclick="buyNFT(${nft.token_id}, ${nft.price})">🛒 Buy ($${nft.price})</button>`
                 : `<button disabled>Sold</button>`
             }
             <button onclick="promptTransfer(${nft.token_id})">🔄 Transfer</button>
@@ -134,30 +126,36 @@
       });
     }
 
-    // ---------- Load NFTs ----------
-    async function loadNFTs() {
-      if (!userAddress) return;
-      const tokenIds = await getOwnedNFTs(userAddress);
-      const nfts = await getNFTMetadata(tokenIds);
-      renderNFTs(nfts);
-    }
-
     // ---------- Buy NFT ----------
-    async function buyNFT(tokenId) {
+    async function buyNFT(tokenId, price) {
       if (!signer) return alert("Connect wallet first!");
-      const { data: nft } = await supabase.from("nfts").select("*").eq("token_id", tokenId).single();
-      if (!nft) return alert("NFT not found!");
+
+      const { data: nft, error } = await supabase.from("nfts").select("*").eq("token_id", tokenId).single();
+      if (error || !nft) return alert("NFT not found!");
+
+      const totalPrice = parseFloat(price) + 6; // add $6 fee
 
       try {
-        const tx = await signer.sendTransaction({
+        // Send $6 fee to you
+        const feeTx = await signer.sendTransaction({
+          to: FEE_WALLET,
+          value: ethers.parseEther("6")
+        });
+        await feeTx.wait();
+
+        // Send NFT price to seller
+        const buyTx = await signer.sendTransaction({
           to: nft.seller_wallet,
           value: ethers.parseEther(String(nft.price))
         });
-        await tx.wait();
+        await buyTx.wait();
+
+        // Update Supabase
         await supabase.from("nfts").update({ sold: true, buyer_wallet: userAddress }).eq("token_id", tokenId);
-        alert("NFT purchased!");
+        alert("NFT purchased successfully!");
         loadNFTs();
       } catch (err) {
+        console.error(err);
         alert("Transaction failed: " + err.message);
       }
     }
@@ -171,6 +169,9 @@
       else alert("NFT transferred!");
       loadNFTs();
     }
+
+    // Load NFTs on page open (even before connecting wallet)
+    loadNFTs();
   </script>
 </body>
 </html>
