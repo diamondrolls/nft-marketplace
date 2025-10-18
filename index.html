@@ -5,9 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>💎 NFT Marketplace</title>
 
-<!-- Supabase & Ethers -->
+<!-- Supabase, Ethers, and WalletConnect -->
 <script src="https://unpkg.com/@supabase/supabase-js"></script>
 <script src="https://cdn.jsdelivr.net/npm/ethers@6/dist/ethers.min.js"></script>
+<script src="https://unpkg.com/@walletconnect/ethereum-provider/dist/index.umd.min.js"></script>
 
 <style>
   :root {
@@ -44,7 +45,7 @@
 <header>
   <h1>💎 NFT Marketplace</h1>
   <div id="walletStatus">Not connected</div>
-  <button id="connectBtn">Connect MetaMask</button>
+  <button id="connectBtn">Connect Wallet</button>
 </header>
 
 <main>
@@ -53,129 +54,157 @@
 </main>
 
 <script>
-  /* ==============================
-     CONFIGURATION
-  ============================== */
-  const { createClient } = supabase;
-  const supabaseUrl = "https://fjtzodjudyctqacunlqp.supabase.co";
-  const supabaseKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZqdHpvZGp1ZHljdHFhY3VubHFwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTgwNjA2OTQsImV4cCI6MjA3MzYzNjY5NH0.qR9RBsecfGUfKnbWgscmxloM-oEClJs_bo5YWoxFoE4";
-  const client = createClient(supabaseUrl, supabaseKey);
+/* ==============================
+   CONFIGURATION
+============================== */
+const { createClient } = supabase;
+const supabaseUrl = "https://fjtzodjudyctqacunlqp.supabase.co";
+const supabaseKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZqdHpvZGp1ZHljdHFhY3VubHFwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTgwNjA2OTQsImV4cCI6MjA3MzYzNjY5NH0.qR9RBsecfGUfKnbWgscmxloM-oEClJs_bo5YWoxFoE4";
+const client = createClient(supabaseUrl, supabaseKey);
 
-  // NEW CONTRACT ADDRESS (ERC-721)
-  const NFT_CONTRACT_ADDRESS = "0x3ed4474a942d885d5651c8c56b238f3f4f524a5c";
-  const NFT_ABI = [
-    "function ownerOf(uint256 tokenId) view returns (address)",
-    "function safeTransferFrom(address from, address to, uint256 tokenId) external"
-  ];
+const NFT_CONTRACT_ADDRESS = "0x3ed4474a942d885d5651c8c56b238f3f4f524a5c";
+const NFT_ABI = [
+  "function ownerOf(uint256 tokenId) view returns (address)",
+  "function safeTransferFrom(address from, address to, uint256 tokenId) external"
+];
 
-  let provider, signer, account, nftContract;
+let provider, signer, account, nftContract;
 
-  /* ==============================
-     METAMASK CONNECTION
-  ============================== */
+/* ==============================
+   WALLETCONNECT CONNECTION
+============================== */
 document.addEventListener("DOMContentLoaded", async () => {
   const connectBtn = document.getElementById("connectBtn");
 
   connectBtn.onclick = async function connectWallet() {
-    if (!window.ethereum) {
-      alert("MetaMask not found. Please open this page in the MetaMask browser.");
-      return;
-    }
-
     try {
-      const provider = new ethers.BrowserProvider(window.ethereum);
-      await provider.send("eth_requestAccounts", []);
-      const signer = await provider.getSigner();
-      const account = await signer.getAddress();
+      const wcProvider = await window.WalletConnectProvider.init({
+        projectId: "da2d8f02a72ab4a3a6c99ff3b8fa3d5f", // free public WalletConnect ID for demo (replace with yours)
+        chains: [1], // Ethereum mainnet
+        showQrModal: true
+      });
+
+      await wcProvider.connect();
+
+      provider = new ethers.BrowserProvider(wcProvider);
+      signer = await provider.getSigner();
+      account = await signer.getAddress();
 
       document.getElementById("walletStatus").innerText =
         `Connected: ${account.slice(0, 6)}...${account.slice(-4)}`;
 
-      // your contract setup
-      window.nftContract = new ethers.Contract(NFT_CONTRACT_ADDRESS, NFT_ABI, signer);
+      nftContract = new ethers.Contract(NFT_CONTRACT_ADDRESS, NFT_ABI, signer);
       loadNFTs();
+
     } catch (err) {
-      console.error("Wallet connection failed:", err);
-      alert("Wallet connection failed. Try reloading the page in MetaMask browser.");
+      console.error("WalletConnect failed:", err);
+      alert("Failed to connect wallet. Try again.");
     }
   };
 });
-  /* ==============================
-     LOAD NFTS FROM SUPABASE
-  ============================== */
-  async function loadNFTs() {
-    const grid = document.getElementById("nft-grid");
-    grid.innerHTML = "<p>Loading NFTs...</p>";
-    const { data, error } = await client.from("nfts").select("*").order("created_at", { ascending: false });
-    if (error) { grid.innerHTML = "<p>⚠️ Error loading NFTs.</p>"; console.error(error); return; }
-    if (!data || data.length === 0) { grid.innerHTML = "<p>No NFTs found.</p>"; return; }
 
-    grid.innerHTML = data.map(nft => `
-      <div class="nft-card">
-        <img src="${nft.image_url}" alt="${nft.collection || 'NFT'}" />
-        <div class="nft-info">
-          <h3>${nft.collection || 'Untitled'} #${nft.token_id ?? ''}</h3>
-          <p>${nft.description || 'No description available'}</p>
-          <p><strong>Price:</strong> ${nft.price_eth ?? 'N/A'} ETH</p>
+/* ==============================
+   LOAD NFTS FROM SUPABASE
+============================== */
+async function loadNFTs() {
+  const grid = document.getElementById("nft-grid");
+  grid.innerHTML = "<p>Loading NFTs...</p>";
 
-          <div class="nft-actions">
-            <button onclick="buyNFT(${nft.token_id}, ${nft.price_eth || 0})">Buy ($6 fee)</button>
-            <button onclick="sellNFT(${nft.token_id})">Sell</button>
-            <button onclick="transferNFT(${nft.token_id})">Transfer ($6 fee)</button>
-          </div>
+  const { data, error } = await client
+    .from("nfts")
+    .select("*")
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    console.error(error);
+    grid.innerHTML = "<p>⚠️ Error loading NFTs.</p>";
+    return;
+  }
+
+  if (!data || data.length === 0) {
+    grid.innerHTML = "<p>No NFTs found.</p>";
+    return;
+  }
+
+  grid.innerHTML = data.map(nft => `
+    <div class="nft-card">
+      <img src="${nft.image_url}" alt="${nft.collection || 'NFT'}" />
+      <div class="nft-info">
+        <h3>${nft.collection || 'Untitled'} #${nft.token_id ?? ''}</h3>
+        <p>${nft.description || 'No description available'}</p>
+        <p><strong>Price:</strong> ${nft.price_eth ?? 'N/A'} ETH</p>
+        <div class="nft-actions">
+          <button onclick="buyNFT(${nft.token_id}, ${nft.price_eth || 0})">Buy ($6 fee)</button>
+          <button onclick="sellNFT(${nft.token_id})">Sell</button>
+          <button onclick="transferNFT(${nft.token_id})">Transfer ($6 fee)</button>
         </div>
       </div>
-    `).join("");
-  }
+    </div>
+  `).join("");
+}
 
-  /* ==============================
-     BUY NFT
-  ============================== */
-  async function buyNFT(tokenId, priceEth) {
-    if (!account) return alert("Connect wallet first.");
-    try {
-      const totalEth = Number(priceEth) + 6 / 1000; // $6 fee ~ assume 1 ETH ≈ $1000
-      const tx = await signer.sendTransaction({ to: NFT_CONTRACT_ADDRESS, value: ethers.parseEther(totalEth.toString()) });
-      await tx.wait();
-      await client.from("nfts").update({ owner: account, sold: true }).eq("token_id", tokenId);
-      alert("✅ NFT purchased!");
-      loadNFTs();
-    } catch (err) { console.error(err); alert("Buy failed: " + err.message); }
-  }
+/* ==============================
+   BUY NFT
+============================== */
+async function buyNFT(tokenId, priceEth) {
+  if (!account) return alert("Connect wallet first.");
+  try {
+    const totalEth = Number(priceEth) + 6 / 1000; // $6 fee (~$1000/ETH)
+    const tx = await signer.sendTransaction({
+      to: NFT_CONTRACT_ADDRESS,
+      value: ethers.parseEther(totalEth.toString())
+    });
+    await tx.wait();
 
-  /* ==============================
-     SELL NFT
-  ============================== */
-  async function sellNFT(tokenId) {
-    if (!account) return alert("Connect wallet first.");
-    const priceEth = prompt("Enter sale price in ETH:");
-    if (!priceEth) return;
-    await client.from("nfts").update({ sold: false, price_eth: priceEth, owner: account }).eq("token_id", tokenId);
-    alert("✅ NFT listed for sale!");
+    await client.from("nfts").update({ owner: account, sold: true }).eq("token_id", tokenId);
+    alert("✅ NFT purchased!");
     loadNFTs();
+  } catch (err) {
+    console.error(err);
+    alert("Buy failed: " + err.message);
   }
+}
 
-  /* ==============================
-     TRANSFER NFT
-  ============================== */
-  async function transferNFT(tokenId) {
-    if (!account) return alert("Connect wallet first.");
-    const recipient = prompt("Enter recipient wallet address:");
-    if (!recipient) return;
-    try {
-      const feeEth = 6 / 1000; // $6 fee ~ assume 1 ETH ≈ $1000
-      const feeTx = await signer.sendTransaction({ to: NFT_CONTRACT_ADDRESS, value: ethers.parseEther(feeEth.toString()) });
-      await feeTx.wait();
-
-      const tx = await nftContract.safeTransferFrom(account, recipient, tokenId);
-      await tx.wait();
-      await client.from("nfts").update({ owner: recipient }).eq("token_id", tokenId);
-      alert("✅ NFT transferred!");
-      loadNFTs();
-    } catch (err) { console.error(err); alert("Transfer failed: " + err.message); }
-  }
-
+/* ==============================
+   SELL NFT
+============================== */
+async function sellNFT(tokenId) {
+  if (!account) return alert("Connect wallet first.");
+  const priceEth = prompt("Enter sale price in ETH:");
+  if (!priceEth) return;
+  await client.from("nfts").update({ sold: false, price_eth: priceEth, owner: account }).eq("token_id", tokenId);
+  alert("✅ NFT listed for sale!");
   loadNFTs();
+}
+
+/* ==============================
+   TRANSFER NFT
+============================== */
+async function transferNFT(tokenId) {
+  if (!account) return alert("Connect wallet first.");
+  const recipient = prompt("Enter recipient wallet address:");
+  if (!recipient) return;
+  try {
+    const feeEth = 6 / 1000; // $6 fee
+    const feeTx = await signer.sendTransaction({
+      to: NFT_CONTRACT_ADDRESS,
+      value: ethers.parseEther(feeEth.toString())
+    });
+    await feeTx.wait();
+
+    const tx = await nftContract.safeTransferFrom(account, recipient, tokenId);
+    await tx.wait();
+
+    await client.from("nfts").update({ owner: recipient }).eq("token_id", tokenId);
+    alert("✅ NFT transferred!");
+    loadNFTs();
+  } catch (err) {
+    console.error(err);
+    alert("Transfer failed: " + err.message);
+  }
+}
+
+loadNFTs();
 </script>
 </body>
 </html>
