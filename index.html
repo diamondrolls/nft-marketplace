@@ -73,18 +73,33 @@
   /* ==============================
      METAMASK CONNECTION
   ============================== */
-  async function connectWallet() {
-    if (!window.ethereum) return alert("MetaMask not found!");
-    provider = new ethers.BrowserProvider(window.ethereum);
-    await provider.send("eth_requestAccounts", []);
-    signer = await provider.getSigner();
-    account = await signer.getAddress();
-    nftContract = new ethers.Contract(NFT_CONTRACT_ADDRESS, NFT_ABI, signer);
-    document.getElementById("walletStatus").innerText = `Connected: ${account.slice(0,6)}...${account.slice(-4)}`;
-    loadNFTs();
-  }
-  document.getElementById("connectBtn").onclick = connectWallet;
+document.addEventListener("DOMContentLoaded", async () => {
+  const connectBtn = document.getElementById("connectBtn");
 
+  connectBtn.onclick = async function connectWallet() {
+    if (!window.ethereum) {
+      alert("MetaMask not found. Please open this page in the MetaMask browser.");
+      return;
+    }
+
+    try {
+      const provider = new ethers.BrowserProvider(window.ethereum);
+      await provider.send("eth_requestAccounts", []);
+      const signer = await provider.getSigner();
+      const account = await signer.getAddress();
+
+      document.getElementById("walletStatus").innerText =
+        `Connected: ${account.slice(0, 6)}...${account.slice(-4)}`;
+
+      // your contract setup
+      window.nftContract = new ethers.Contract(NFT_CONTRACT_ADDRESS, NFT_ABI, signer);
+      loadNFTs();
+    } catch (err) {
+      console.error("Wallet connection failed:", err);
+      alert("Wallet connection failed. Try reloading the page in MetaMask browser.");
+    }
+  };
+});
   /* ==============================
      LOAD NFTS FROM SUPABASE
   ============================== */
