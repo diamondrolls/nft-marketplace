@@ -8,7 +8,7 @@
 <!-- Supabase, Ethers, and WalletConnect -->
 <script src="https://unpkg.com/@supabase/supabase-js"></script>
 <script src="https://cdn.jsdelivr.net/npm/ethers@6/dist/ethers.min.js"></script>
-<script src="https://unpkg.com/@walletconnect/ethereum-provider/dist/index.umd.min.js"></script>
+<script src="https://unpkg.com/@walletconnect/ethereum-provider@2.11.0/dist/index.umd.min.js"></script>
 
 <style>
   :root {
@@ -57,10 +57,9 @@
 /* ==============================
    CONFIGURATION
 ============================== */
-const { createClient } = supabase;
 const supabaseUrl = "https://fjtzodjudyctqacunlqp.supabase.co";
 const supabaseKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZqdHpvZGp1ZHljdHFhY3VubHFwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTgwNjA2OTQsImV4cCI6MjA3MzYzNjY5NH0.qR9RBsecfGUfKnbWgscmxloM-oEClJs_bo5YWoxFoE4";
-const client = createClient(supabaseUrl, supabaseKey);
+const client = supabase.createClient(supabaseUrl, supabaseKey);
 
 const NFT_CONTRACT_ADDRESS = "0x3ed4474a942d885d5651c8c56b238f3f4f524a5c";
 const NFT_ABI = [
@@ -73,34 +72,30 @@ let provider, signer, account, nftContract;
 /* ==============================
    WALLETCONNECT CONNECTION
 ============================== */
-document.addEventListener("DOMContentLoaded", async () => {
-  const connectBtn = document.getElementById("connectBtn");
+document.getElementById("connectBtn").addEventListener("click", async () => {
+  try {
+    const wcProvider = await window.EthereumProvider.init({
+      projectId: "da2d8f02a72ab4a3a6c99ff3b8fa3d5f", // replace with your WalletConnect Cloud Project ID
+      chains: [1], // Ethereum mainnet
+      showQrModal: true
+    });
 
-  connectBtn.onclick = async function connectWallet() {
-    try {
-      const wcProvider = await window.WalletConnectProvider.init({
-        projectId: "da2d8f02a72ab4a3a6c99ff3b8fa3d5f", // free public WalletConnect ID for demo (replace with yours)
-        chains: [1], // Ethereum mainnet
-        showQrModal: true
-      });
+    await wcProvider.connect();
 
-      await wcProvider.connect();
+    provider = new ethers.BrowserProvider(wcProvider);
+    signer = await provider.getSigner();
+    account = await signer.getAddress();
 
-      provider = new ethers.BrowserProvider(wcProvider);
-      signer = await provider.getSigner();
-      account = await signer.getAddress();
+    document.getElementById("walletStatus").innerText =
+      `✅ Connected: ${account.slice(0, 6)}...${account.slice(-4)}`;
 
-      document.getElementById("walletStatus").innerText =
-        `Connected: ${account.slice(0, 6)}...${account.slice(-4)}`;
+    nftContract = new ethers.Contract(NFT_CONTRACT_ADDRESS, NFT_ABI, signer);
+    loadNFTs();
 
-      nftContract = new ethers.Contract(NFT_CONTRACT_ADDRESS, NFT_ABI, signer);
-      loadNFTs();
-
-    } catch (err) {
-      console.error("WalletConnect failed:", err);
-      alert("Failed to connect wallet. Try again.");
-    }
-  };
+  } catch (err) {
+    console.error("WalletConnect connection failed:", err);
+    alert("Failed to connect wallet. Try again.");
+  }
 });
 
 /* ==============================
@@ -149,7 +144,7 @@ async function loadNFTs() {
 async function buyNFT(tokenId, priceEth) {
   if (!account) return alert("Connect wallet first.");
   try {
-    const totalEth = Number(priceEth) + 6 / 1000; // $6 fee (~$1000/ETH)
+    const totalEth = Number(priceEth) + 6 / 1000; // $6 fee
     const tx = await signer.sendTransaction({
       to: NFT_CONTRACT_ADDRESS,
       value: ethers.parseEther(totalEth.toString())
