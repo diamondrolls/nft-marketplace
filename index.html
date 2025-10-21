@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>💎 NFT Marketplace</title>
 
-<!-- Supabase, Ethers, and WalletConnect -->
+<!-- Supabase, Ethers, WalletConnect -->
 <script src="https://unpkg.com/@supabase/supabase-js"></script>
 <script src="https://cdn.jsdelivr.net/npm/ethers@6/dist/ethers.min.js"></script>
 <script src="https://unpkg.com/@walletconnect/ethereum-provider@2.11.0/dist/index.umd.min.js"></script>
@@ -20,18 +20,23 @@
     --shadow: 0 4px 12px rgba(0,0,0,0.08);
   }
   .homepage{
-	borderstyle:outset;
-	width:270px;
-	height:100px;
-	background-image:url('https://i.pinimg.com/564x/35/38/ed/3538edbdb531c7fe3bb387ead4b398b0.jpg');
-	background-size:270px 100px;
-	border-radius:50%;
-		   }
+    border-style: outset;
+    width: 270px;
+    height: 100px;
+    background-image: url('https://i.pinimg.com/564x/35/38/ed/3538edbdb531c7fe3bb387ead4b398b0.jpg');
+    background-size: 270px 100px;
+    border-radius: 50%;
+    text-align: center;
+    line-height: 100px;
+    color: white;
+    font-weight: bold;
+  }
   * { box-sizing: border-box; }
   body { font-family: system-ui, sans-serif; background: var(--bg); margin: 0; padding: 0; color: var(--text-dark); }
   header { background: var(--card-bg); text-align: center; padding: 18px 12px; border-bottom: 1px solid #e2e8f0; position: sticky; top: 0; z-index: 10; }
   h1 { font-size: 1.8rem; margin: 0; }
   #walletStatus { margin-top: 8px; font-size: 0.9rem; color: var(--text-light); }
+  #connectBtn { margin-top: 6px; }
   main { padding: 24px; max-width: 1200px; margin: 0 auto; }
   h2 { margin: 0 0 20px; font-size: 1.4rem; font-weight: 600; }
   .nft-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 24px; }
@@ -51,7 +56,9 @@
 
 <body>
 <header>
-   <a href='https://diamondrolls.github.io/thepremiumway/'> <div class="homepage"><h1>Home</h1></div></a>
+  <a href='https://diamondrolls.github.io/thepremiumway/'> 
+    <div class="homepage">Home</div>
+  </a>
   <h1>NFT Marketplace</h1>
   <div id="walletStatus">Not connected</div>
   <button id="connectBtn">Connect Wallet</button>
@@ -84,7 +91,7 @@ let provider, signer, account, nftContract;
 document.getElementById("connectBtn").addEventListener("click", async () => {
   try {
     const wcProvider = await window.EthereumProvider.init({
-      projectId: "da2d8f02a72ab4a3a6c99ff3b8fa3d5f", // replace with your WalletConnect Cloud Project ID
+      projectId: "1e5dc4fcf271be7666a255bf76a4c275", // your WalletConnect Cloud Project ID
       chains: [1], // Ethereum mainnet
       showQrModal: true
     });
@@ -103,7 +110,7 @@ document.getElementById("connectBtn").addEventListener("click", async () => {
 
   } catch (err) {
     console.error("WalletConnect connection failed:", err);
-    alert("Failed to connect wallet. Try again.");
+    alert("Failed to connect wallet. Try again inside MetaMask browser.");
   }
 });
 
