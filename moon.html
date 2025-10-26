@@ -1159,7 +1159,7 @@ async function loadMoonNFTs() {
   
   // Position NFTs in a circular pattern around the moon, avoiding the space base
   const basePosition = spaceBase.position.clone();
-  const baseRadius = 80; // Space base exclusion radius
+  const baseRadius = 50; // Space base exclusion radius
   
   data.forEach((nft, index) => {
     // Calculate position on moon surface
@@ -1187,9 +1187,9 @@ async function loadMoonNFTs() {
     // If we couldn't find a good position after max attempts, place it further away
     if (attempts >= maxAttempts) {
       const angle = (index / data.length) * Math.PI * 2;
-      const distance = 350; // Further away from center
+      const distance = 150; // Further away from center
       position = getMoonSurfacePosition(distance, angle);
-      position.normalize().multiplyScalar(moonRadius + 8);
+      position.normalize().multiplyScalar(moonRadius + 5);
     }
     
     createNFTPlane(nft, position);
