@@ -765,15 +765,16 @@ function createCity() {
   const cityGroup = new THREE.Group();
   const buildingColors = [0x3B82F6, 0xEF4444, 0x10B981, 0xF59E0B, 0x8B5CF6];
   
-  // Create only buildings that are on the map
+  // Create buildings with WIDER dimensions
   const gridSize = 5;
-  const spacing = 60;
+  const spacing = 120; // Increased spacing for wider buildings
   
   for (let x = 0; x < gridSize; x++) {
     for (let z = 0; z < gridSize; z++) {
-      const height = 30 + Math.random() * 70;
-      const width = 20 + Math.random() * 15;
-      const depth = 20 + Math.random() * 15;
+      // Make buildings WIDER but not as tall
+      const width = 40 + Math.random() * 30;  // Increased from 20-35 to 40-70
+      const depth = 40 + Math.random() * 30;  // Increased from 20-35 to 40-70
+      const height = 20 + Math.random() * 40; // Reduced height for better proportions
       
       const buildingGeometry = new THREE.BoxGeometry(width, height, depth);
       const buildingMaterial = new THREE.MeshLambertMaterial({ 
@@ -782,7 +783,7 @@ function createCity() {
       
       const building = new THREE.Mesh(buildingGeometry, buildingMaterial);
       
-      // Position buildings in a tighter cluster in the center
+      // Position buildings with more spacing
       building.position.set(
         (x - gridSize/2) * spacing,
         height / 2,
@@ -1604,4 +1605,4 @@ async function transferNFT(tokenId) {
 </script>
 
 </body>
-</html>   
+</html>
