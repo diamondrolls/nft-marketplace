@@ -219,12 +219,6 @@
     border: 2px solid white;
   }
   
-  #mini-map canvas {
-    width: 100%;
-    height: 100%;
-    border-radius: 6px;
-  }
-  
   #location-info {
     position: absolute;
     top: 70px;
@@ -573,11 +567,13 @@ let moon;
 let clock = new THREE.Clock();
 let prevTime = 0;
 
-// Collision detection variables
+// Collision detection variables - MODIFIED FOR ROOF JUMPING
 let collisionObjects = [];
 let roofObjects = []; // For roof surfaces you can walk on
 let playerCollider = new THREE.Box3();
 let playerSize = new THREE.Vector3(2, 10, 2); // Player collision box size
+let playerOnRoof = false; // Track if player is on a roof
+let currentRoof = null; // Track which roof player is on
 
 function init3DScene() {
   // Create scene
@@ -831,7 +827,12 @@ function createBuildingRoof(x, y, z, width, depth) {
     new THREE.Vector3(x, y + 0.1, z),
     new THREE.Vector3(width, 0.2, depth)
   );
-  roofObjects.push(roofBox);
+  roofObjects.push({
+    box: roofBox,
+    position: new THREE.Vector3(x, y + 0.1, z),
+    width: width,
+    depth: depth
+  });
   
   // Also add the roof to the main collision objects to prevent falling through
   collisionObjects.push(roofBox);
@@ -1057,7 +1058,11 @@ function updateLocationInfo() {
   
   // Check if player is in the city
   if (x > -200 && x < 200 && z > -200 && z < 200) {
-    locationInfo.textContent = "Location: City Center";
+    if (playerOnRoof) {
+      locationInfo.textContent = "Location: City Center (On Roof)";
+    } else {
+      locationInfo.textContent = "Location: City Center";
+    }
   }
   // Check if player is on the moon
   else if (y > 600) {
@@ -1075,7 +1080,7 @@ function onWindowResize() {
   renderer.setSize(window.innerWidth, window.innerHeight);
 }
 
-// Collision detection function
+// MODIFIED COLLISION DETECTION FOR ROOF JUMPING
 function checkCollisions(newPosition) {
   // Update player collider position and size
   playerCollider.setFromCenterAndSize(
@@ -1091,6 +1096,41 @@ function checkCollisions(newPosition) {
   }
   
   return false; // No collision
+}
+
+// NEW FUNCTION: Check if player is on a roof
+function checkRoofCollision(newPosition) {
+  playerOnRoof = false;
+  currentRoof = null;
+  
+  // Check if player is on top of any roof
+  for (let i = 0; i < roofObjects.length; i++) {
+    const roof = roofObjects[i];
+    const roofBox = roof.box;
+    
+    // Check if player is above the roof and within its bounds
+    if (newPosition.x >= roofBox.min.x && newPosition.x <= roofBox.max.x &&
+        newPosition.z >= roofBox.min.z && newPosition.z <= roofBox.max.z &&
+        Math.abs(newPosition.y - roofBox.max.y) < 5) { // Within 5 units of roof top
+      
+      playerOnRoof = true;
+      currentRoof = roof;
+      return true;
+    }
+  }
+  
+  return false;
+}
+
+// NEW FUNCTION: Snap player to roof when landing
+function snapToRoof(newPosition) {
+  if (currentRoof) {
+    newPosition.y = currentRoof.box.max.y;
+    velocity.y = 0;
+    canJump = true;
+    return true;
+  }
+  return false;
 }
 
 function animate() {
@@ -1126,6 +1166,15 @@ function animate() {
     velocity.y -= 9.8 * 100.0 * delta;
     newPosition.y += (velocity.y * delta);
     
+    // Check if player is on a roof
+    const wasOnRoof = playerOnRoof;
+    checkRoofCollision(newPosition);
+    
+    // If player is on a roof, snap to roof height
+    if (playerOnRoof && velocity.y <= 0) {
+      snapToRoof(newPosition);
+    }
+    
     // Check for collisions before updating position
     if (!checkCollisions(newPosition)) {
       // No collision, update position
@@ -1145,7 +1194,7 @@ function animate() {
     }
     
     // Prevent going below ground level
-    if (camera.position.y < 5) {
+    if (camera.position.y < 5 && !playerOnRoof) {
       camera.position.y = 5;
       velocity.y = 0;
       canJump = true;
@@ -1211,6 +1260,15 @@ function animate() {
     velocity.y -= 9.8 * 100.0 * delta;
     newPosition.y += (velocity.y * delta);
     
+    // Check if player is on a roof
+    const wasOnRoof = playerOnRoof;
+    checkRoofCollision(newPosition);
+    
+    // If player is on a roof, snap to roof height
+    if (playerOnRoof && velocity.y <= 0) {
+      snapToRoof(newPosition);
+    }
+    
     // Check for collisions before updating position
     if (!checkCollisions(newPosition)) {
       // No collision, update position
@@ -1226,7 +1284,7 @@ function animate() {
     }
     
     // Prevent going below ground level
-    if (camera.position.y < 5) {
+    if (camera.position.y < 5 && !playerOnRoof) {
       camera.position.y = 5;
       velocity.y = 0;
       canJump = true;
