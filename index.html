@@ -441,7 +441,12 @@ const NFT_ABI = [
 const RECEIVER_ADDRESS = "0xaE0C180e071eE288B2F2f6ff6edaeF014678fFB7";
 
 let web3, account, nftContract;
-
+// Redirect to login page if not logged in
+  client.auth.getSession().then(({ data }) => {
+    if (!data.session) {
+      window.location.href = 'https://diamondrolls.github.io/play/';
+    }
+  });
 /* ==============================
    AVATAR SELECTION
 ============================== */
@@ -1618,7 +1623,7 @@ function createRandomNFTColumn(nfts) {
   const columnHeight = 500; // Height of the vertical column
   const baseX = 0; // Center of the map
   const baseZ = 0; // Center of the map
-  const maxRadius = 40; // Maximum distance from center
+  const maxRadius = 60; // Maximum distance from center
   
   // Create platforms and NFTs at random positions within the column
   nfts.forEach((nft, index) => {
