@@ -759,7 +759,7 @@ let lastShotTime = 0;
 let shotCooldown = 200; // ms
 
 // NFT interaction distance
-const nftInteractionDistance = 50; // Increased from default
+const nftInteractionDistance = 60; // Increased from default
 
 // Redirect to login page if not logged in
 client.auth.getSession().then(({ data }) => {
@@ -2849,20 +2849,20 @@ async function loadNFTs() {
 }
 
 /* ==============================
-   CREATE RANDOM VERTICAL NFT COLUMN WITH BETTER SPACING
+   CREATE RANDOM VERTICAL NFT COLUMN
 ============================== */
 function createRandomNFTColumn(nfts) {
-  const columnHeight = 600; // Increased height for better spacing
+  const columnHeight = 500; // Height of the vertical column
   const baseX = 0; // Center of the map
   const baseZ = 0; // Center of the map
-  const maxRadius = 100; // Increased maximum distance from center for better spacing
+  const maxRadius = 40; // Maximum distance from center
   
-  // Create platforms and NFTs at random positions within the column with BETTER SPACING
+  // Create platforms and NFTs at random positions within the column
   nfts.forEach((nft, index) => {
-    // Random position within a cylindrical volume with BETTER SPACING
-    const height = 50 + (index * 40); // More consistent vertical spacing
-    const radius = 20 + (Math.random() * maxRadius); // More spread out
-    const angle = (index / nfts.length) * Math.PI * 2; // More organized placement
+    // Random position within a cylindrical volume
+    const height = Math.random() * columnHeight;
+    const radius = Math.random() * maxRadius; // Random distance from center
+    const angle = Math.random() * Math.PI * 2; // Random angle
     
     const x = baseX + Math.cos(angle) * radius;
     const y = height + 10; // Start above ground
@@ -2875,7 +2875,6 @@ function createRandomNFTColumn(nfts) {
     createNFTPlane(nft, { x, y, z });
   });
 }
-
 /* ==============================
    BUY NFT
 ============================== */
