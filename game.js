@@ -94,14 +94,6 @@ let selectedAvatar = null;
    INITIALIZATION
 ============================== */
 
-// Check authentication on load
-document.addEventListener('DOMContentLoaded', function() {
-  client.auth.getSession().then(({ data }) => {
-    if (!data.session) {
-      window.location.href = 'https://diamondrolls.github.io/play/';
-    }
-  });
-
   // Set up mobile UI
   if (isMobile) {
     document.getElementById('desktop-instructions').style.display = 'none';
