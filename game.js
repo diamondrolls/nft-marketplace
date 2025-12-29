@@ -1,17 +1,111 @@
 /* ==============================
    CONFIGURATION & GLOBAL VARIABLES
 ============================== */
-const supabaseUrl = "https://fjtzodjudyctqacunlqp.supabase.co";
-const supabaseKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZqdHpvZGp1ZHljdHFhY3VubHFwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTgwNjA2OTQsImV4cCI6MjA3MzYzNjY5NH0.qR9RBsecfGUfKnbWgscmxloM-oEClJs_bo5YWoxFoE4";
-const client = supabase.createClient(supabaseUrl, supabaseKey);
+const SUPABASE_URL = "https://fjtzodjudyctqacunlqp.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZqdHpvZGp1ZHljdHFhY3VubHFwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTgwNjA2OTQsImV4cCI6MjA3MzYzNjY5NH0.qR9RBsecfGUfKnbWgscmxloM-oEClJs_bo5YWoxFoE4";
+
+const TOKEN_FUNCTION_URL = "https://fjtzodjudyctqacunlqp.supabase.co/functions/v1/game-tokens";
+
+const client = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 const NFT_CONTRACT_ADDRESS = "0x3ed4474a942d885d5651c8c56b238f3f4f524a5c";
+
 const NFT_ABI = [
-  { "constant":true,"inputs":[{"name":"tokenId","type":"uint256"}],"name":"ownerOf","outputs":[{"name":"","type":"address"}],"type":"function" },
-  { "constant":false,"inputs":[{"name":"from","type":"address"},{"name":"to","type":"address"},{"name":"tokenId","type":"uint256"}],"name":"safeTransferFrom","outputs":[],"type":"function" }
+  {
+    constant: true,
+    inputs: [{ name: "tokenId", type: "uint256" }],
+    name: "ownerOf",
+    outputs: [{ name: "", type: "address" }],
+    type: "function"
+  },
+  {
+    constant: false,
+    inputs: [
+      { name: "from", type: "address" },
+      { name: "to", type: "address" },
+      { name: "tokenId", type: "uint256" }
+    ],
+    name: "safeTransferFrom",
+    outputs: [],
+    type: "function"
+  }
 ];
+
 const RECEIVER_ADDRESS = "0xaE0C180e071eE288B2F2f6ff6edaeF014678fFB7";
 
+/**
+ * Updates the player count and list UI from Supabase Realtime Presence state.
+ *
+ * @param {Object} state - Presence state from Supabase.
+ *                         Format: { [sessionId]: [{ name: string, ... }[]] }
+ */
+function updatePlayerCountAndList(state) {
+  const playerCountElement = document.querySelector('#player-count');
+  const playerListElement = document.querySelector('#player-list');
+
+  if (!playerCountElement || !playerListElement) {
+    console.warn('Player count/list DOM elements missing (#player-count or #player-list)');
+    return;
+  }
+
+  // Extract unique player names safely
+  const playerNames = new Set();
+
+  Object.values(state).forEach((presences) => {
+    presences.forEach((presence) => {
+      if (presence.name && typeof presence.name === 'string') {
+        playerNames.add(presence.name.trim());
+      }
+    });
+  });
+
+  const playerCount = playerNames.size;
+
+  playerCountElement.textContent = `Players: ${playerCount}`;
+
+  // Rebuild list
+  playerListElement.innerHTML = '';
+
+  if (playerCount === 0) {
+    const li = document.createElement('li');
+    li.textContent = 'No players online';
+    li.style.color = '#888';
+    playerListElement.appendChild(li);
+  } else {
+    [...playerNames].sort().forEach((name) => {
+      const li = document.createElement('li');
+      li.textContent = name;
+      playerListElement.appendChild(li);
+    });
+  }
+}
+
+/**
+ * Updates room info UI with current room ID and shareable link.
+ * The game uses dynamic rooms via URL param ?room=...
+ */
+function updateRoomInfoUI() {
+  const roomInfoElement = document.querySelector('#room-info');
+  const roomLinkElement = document.querySelector('#room-link');
+
+  if (!roomInfoElement || !roomLinkElement) {
+    console.warn("Missing room info DOM elements (#room-info or #room-link)");
+    return;
+  }
+
+  const roomId = multiplayer?.currentRoomId || 'default-world';
+  const joinLink = window.location.href.split('?')[0] + (roomId !== 'default-world' ? `?room=${roomId}` : '');
+
+  roomInfoElement.textContent = `Room ID: ${roomId}`;
+  roomLinkElement.textContent = joinLink;
+  roomLinkElement.href = joinLink;
+  roomLinkElement.target = '_blank';
+  roomLinkElement.rel = 'noopener noreferrer';
+}
+
+/* ==============================
+   GLOBAL GAME STATE & VARIABLES
+============================== */
 let web3, account, nftContract;
 
 // Game economy configuration
@@ -61,6 +155,7 @@ let miniMapScene, miniMapCamera, miniMapRenderer;
 let playerAvatar;
 let clock = new THREE.Clock();
 let prevTime = 0;
+let lastSendTime = 0;
 
 // Camera controls
 let cameraDistance = 25;
@@ -96,22 +191,32 @@ let lookX = 0, lookY = 0;
 let velocity = new THREE.Vector3();
 let canJump = true;
 
-// Multiplayer
-let multiplayer;
-let selectedAvatar = null;
+// Multiplayer state
+let multiplayer = {
+  playerId: null,
+  playerName: null,
+  playerColor: null,
+  otherPlayers: new Map(),
+  gameChannel: null,
+  currentRoomId: null
+};
 
-// Assistant Bots
+// Helper: generate unique player ID
+function generatePlayerId() {
+  return 'player-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
+}
+
+// Assistant bots manager
 let botManager;
 
 /* ==============================
-   OPTIMIZED NFT LOADING SYSTEM
+   NFT LOADING GLOBALS
 ============================== */
-const nftCache = new Map();
-const textureLoader = new THREE.TextureLoader();
 const nftLoadingQueue = [];
-let isProcessingQueue = false;
-const MAX_CONCURRENT_LOADS = 3;
 let activeLoads = 0;
+const MAX_CONCURRENT_LOADS = 3;
+const nftCache = new Map();
+const textureLoader = new THREE.TextureLoader(); // ← THIS WAS MISSING!
 
 /* ==============================
    ASSISTANT BOT ROAMING SYSTEM
@@ -469,73 +574,11 @@ document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('mobile-instructions').style.display = 'block';
     setupMobileControls();
   }
-
-  setupAvatarSelection();
+   setupAvatarSelectionAndGameStart();
 });
 
-/* ==============================
-   AVATAR SELECTION SYSTEM
-============================== */
-
-function setupAvatarSelection() {
-  const avatarOptions = document.querySelectorAll('.avatar-option');
-  const confirmButton = document.getElementById('confirm-avatar');
-  
-  avatarOptions.forEach(option => {
-    option.addEventListener('click', () => {
-      avatarOptions.forEach(opt => opt.classList.remove('selected'));
-      option.classList.add('selected');
-      selectedAvatar = option.getAttribute('data-avatar');
-    });
-  });
-
-  confirmButton.addEventListener('click', () => {
-    if (selectedAvatar) {
-      startGame();
-    } else {
-      alert('Please select an avatar to continue');
-    }
-  });
-}
-
-function startGame() {
-  initSidebar();
-  multiplayer = new WebRTCMultiplayer();
-  
-  const nameInput = document.getElementById('player-name');
-  if (nameInput && nameInput.value.trim()) {
-    multiplayer.playerName = nameInput.value.trim();
-  }
-  
-  multiplayer.playerColor = Math.random() * 0xFFFFFF;
-  document.getElementById('avatar-selection').style.display = 'none';
-  
-  init3DScene();
-  
-  // Initialize bot manager with expanded roaming
-  botManager = new BotManager(scene, multiplayer, {
-    maxBots: 8, // More bots for larger area
-    roamRadius: worldBoundary * 0.9, // Almost entire world
-    moveSpeed: 4.0, // Faster movement
-    detectionRange: 100, // Can detect players from farther
-    interactionRange: 25, // Larger interaction radius
-    stateDuration: 8000 // Longer states for more exploration
-  });
-  
-  loadNFTs();
-  initTokenSystem();
-  initBuildingOwnership();
-  setupBulletPurchaseWithTokens();
-  
-  setInterval(() => {
-    if (multiplayer) {
-      multiplayer.sendPositionUpdate();
-    }
-  }, 100);
-}
-
-/* ==============================
-   OPTIMIZED NFT LOADING FUNCTIONS
+   /* ==============================
+   OPTIMIZED NFT LOADING FUNCTIONS (CLEAN & WORKING)
 ============================== */
 
 async function loadNFTs() {
@@ -543,7 +586,7 @@ async function loadNFTs() {
     console.time('NFT Loading');
     clearNFTs();
     
-    const { data, error } = await client.from("nfts").select("*").order("created_at", { ascending: false });
+    const { data, error } = await client.from("nfts").select("*").order("created_at", { ascending: false }).limit(100); // Optional: limit for testing
 
     if (error) {
       console.error("Error loading NFTs:", error);
@@ -555,9 +598,9 @@ async function loadNFTs() {
       return;
     }
 
-    console.log(`Loading ${data.length} NFTs with optimized system`);
+    console.log(`Loading ${data.length} NFTs`);
     createNFTPlaceholders(data);
-    await loadNFTTexturesProgressive(data);
+    processLoadingQueue(); // Start the queue — no await needed here
     console.timeEnd('NFT Loading');
     
   } catch (err) {
@@ -566,25 +609,16 @@ async function loadNFTs() {
 }
 
 function clearNFTs() {
-  const removeBatch = (objects) => {
-    objects.forEach(obj => {
-      scene.remove(obj);
-      if (obj.userData?.glow) scene.remove(obj.userData.glow);
-      if (obj.material) {
-        if (obj.material.map) obj.material.map.dispose();
-        obj.material.dispose();
-      }
-      if (obj.geometry) obj.geometry.dispose();
-    });
-  };
-
-  const batchSize = 10;
-  for (let i = 0; i < nftObjects.length; i += batchSize) {
-    const batch = nftObjects.slice(i, i + batchSize);
-    setTimeout(() => removeBatch(batch), 0);
-  }
+  nftObjects.forEach(obj => {
+    scene.remove(obj);
+    if (obj.userData?.glow) scene.remove(obj.userData.glow);
+    if (obj.material?.map) obj.material.map.dispose();
+    obj.material?.dispose();
+    obj.geometry?.dispose();
+  });
   
   nftObjects = [];
+  
   nftPlatforms.forEach(platform => scene.remove(platform));
   nftPlatforms = [];
 }
@@ -608,105 +642,67 @@ function createNFTPlaceholders(nfts) {
     placeholder.userData = {
       nftData: nft,
       isNFT: true,
-      isPlaceholder: true,
-      originalEmissive: 0x000000
+      isPlaceholder: true
     };
     
-    placeholder.castShadow = true;
-    placeholder.receiveShadow = true;
     scene.add(placeholder);
     nftObjects.push(placeholder);
     
-    nftLoadingQueue.push({
-      nft,
-      placeholder,
-      position
-    });
+    nftLoadingQueue.push({ nft, placeholder, position });
   });
-
-  processLoadingQueue();
 }
 
 function calculateNFTPosition(index, total) {
   const columnHeight = 500;
-  const baseX = 0;
-  const baseZ = 0;
   const maxRadius = 40;
   
   const height = (index / total) * columnHeight;
   const radius = (index % 2 === 0 ? 0.3 : 0.7) * maxRadius;
-  const angle = (index * 137.5) % 360 * (Math.PI / 180);
+  const angle = (index * 137.5) * (Math.PI / 180);
   
   return {
-    x: baseX + Math.cos(angle) * radius,
+    x: Math.cos(angle) * radius,
     y: height + 10,
-    z: baseZ + Math.sin(angle) * radius
+    z: Math.sin(angle) * radius
   };
 }
 
 async function processLoadingQueue() {
-  if (isProcessingQueue || nftLoadingQueue.length === 0) return;
-  
-  isProcessingQueue = true;
-  
-  while (nftLoadingQueue.length > 0) {
-    while (activeLoads >= MAX_CONCURRENT_LOADS) {
-      await new Promise(resolve => setTimeout(resolve, 100));
-    }
-    
-    const item = nftLoadingQueue.shift();
-    if (item) {
-      activeLoads++;
-      loadNFTTexture(item).finally(() => {
-        activeLoads--;
-      });
-    }
-    
-    await new Promise(resolve => setTimeout(resolve, 50));
+  if (nftLoadingQueue.length === 0 || activeLoads >= MAX_CONCURRENT_LOADS) {
+    // Queue empty or at limit — wait a frame and try again
+    if (nftLoadingQueue.length > 0) requestAnimationFrame(processLoadingQueue);
+    return;
   }
-  
-  isProcessingQueue = false;
+
+  const item = nftLoadingQueue.shift();
+  activeLoads++;
+
+  loadNFTTexture(item)
+    .finally(() => {
+      activeLoads--;
+      processLoadingQueue(); // Continue processing
+    });
 }
 
-function loadNFTTexture({ nft, placeholder, position }) {
-  return new Promise((resolve) => {
-    const imageUrl = nft.image_url || 'https://via.placeholder.com/400x400?text=NFT+Image';
-    
-    if (nftCache.has(imageUrl)) {
-      applyTextureToNFT(placeholder, nftCache.get(imageUrl), nft);
-      resolve();
+async function loadNFTTexture({ nft, placeholder }) {
+  try {
+    // Use cache if available
+    if (nftCache.has(nft.image_url)) {
+      applyTextureToNFT(placeholder, nftCache.get(nft.image_url), nft);
       return;
     }
-    
-    const loadTimeout = setTimeout(() => {
-      console.warn(`Timeout loading NFT: ${nft.name || nft.token_id}`);
-      resolve();
-    }, 10000);
-    
-    textureLoader.load(
-      imageUrl,
-      (texture) => {
-        clearTimeout(loadTimeout);
-        texture.anisotropy = renderer.capabilities.getMaxAnisotropy();
-        texture.minFilter = THREE.LinearMipmapLinearFilter;
-        texture.magFilter = THREE.LinearFilter;
-        texture.generateMipmaps = true;
-        nftCache.set(imageUrl, texture);
-        applyTextureToNFT(placeholder, texture, nft);
-        resolve();
-      },
-      (progress) => {
-        if (progress.lengthComputable) {
-          const percent = (progress.loaded / progress.total) * 100;
-        }
-      },
-      (error) => {
-        clearTimeout(loadTimeout);
-        console.error('Error loading NFT image:', error, imageUrl);
-        resolve();
-      }
-    );
-  });
+
+    const texture = await textureLoader.loadAsync(nft.image_url);
+    texture.colorSpace = THREE.SRGBColorSpace;
+
+    nftCache.set(nft.image_url, texture);
+    manageNFTCache();
+
+    applyTextureToNFT(placeholder, texture, nft);
+  } catch (err) {
+    console.error(`Failed to load texture for NFT: ${nft.image_url}`, err);
+    // Optional: show error placeholder
+  }
 }
 
 function applyTextureToNFT(placeholder, texture, nftData) {
@@ -720,7 +716,9 @@ function applyTextureToNFT(placeholder, texture, nftData) {
   placeholder.material.dispose();
   placeholder.material = finalMaterial;
   placeholder.userData.isPlaceholder = false;
-  
+  placeholder.userData.nftData = nftData;
+
+  // Glow effect
   const glowGeometry = new THREE.PlaneGeometry(10.5, 10.5);
   const glowMaterial = new THREE.MeshBasicMaterial({ 
     color: 0x3b82f6,
@@ -735,71 +733,6 @@ function applyTextureToNFT(placeholder, texture, nftData) {
   scene.add(glow);
   
   placeholder.userData.glow = glow;
-  placeholder.userData.nftData = nftData;
-}
-
-async function loadNFTTexturesProgressive(nfts) {
-  const priorities = [];
-  
-  nfts.forEach((nft, index) => {
-    const position = calculateNFTPosition(index, nfts.length);
-    const distance = playerAvatar ? position.distanceTo(playerAvatar.position) : 1000;
-    priorities.push({
-      nft,
-      index,
-      distance,
-      priority: distance < 200 ? 0 : distance < 500 ? 1 : 2
-    });
-  });
-  
-  priorities.sort((a, b) => a.priority - b.priority);
-  
-  for (const item of priorities) {
-    while (activeLoads >= MAX_CONCURRENT_LOADS) {
-      await new Promise(resolve => setTimeout(resolve, 100));
-    }
-    
-    activeLoads++;
-    const nftObj = nftObjects[item.index];
-    if (nftObj && nftObj.userData.isPlaceholder) {
-      loadNFTTexture({
-        nft: item.nft,
-        placeholder: nftObj,
-        position: nftObj.position
-      }).finally(() => {
-        activeLoads--;
-      });
-    } else {
-      activeLoads--;
-    }
-    
-    await new Promise(resolve => setTimeout(resolve, 30));
-  }
-}
-
-function updateNFTLOD() {
-  if (!playerAvatar) return;
-  
-  nftObjects.forEach((nft, index) => {
-    const distance = nft.position.distanceTo(playerAvatar.position);
-    
-    if (distance > 500 && nft.userData.isPlaceholder === false) {
-      nft.material.opacity = 0.7;
-    } else if (distance <= 500 && nft.userData.isPlaceholder === false) {
-      nft.material.opacity = 0.9;
-    }
-    
-    if (distance < 200 && nft.userData.isPlaceholder) {
-      const queueItem = nftLoadingQueue.find(item => item.placeholder === nft);
-      if (!queueItem) {
-        loadNFTTexture({
-          nft: nft.userData.nftData,
-          placeholder: nft,
-          position: nft.position
-        });
-      }
-    }
-  });
 }
 
 function manageNFTCache() {
@@ -815,7 +748,6 @@ function manageNFTCache() {
 }
 
 setInterval(manageNFTCache, 30000);
-
 /* ==============================
    TOKEN ECONOMY SYSTEM
 ============================== */
@@ -1914,356 +1846,10 @@ async function connectWallet() {
 document.getElementById("connectBtn").addEventListener("click", connectWallet);
 
 /* ==============================
-   3D SCENE SETUP
+   WORLD BUILDING & SUPPORT FUNCTIONS
 ============================== */
 
-function init3DScene() {
-  scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x000033);
-  scene.fog = new THREE.Fog(0x000033, 100, 2000);
-  
-  camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 5000);
-  
-  renderer = new THREE.WebGLRenderer({ antialias: true });
-  renderer.setSize(window.innerWidth, window.innerHeight);
-  renderer.shadowMap.enabled = true;
-  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-  document.getElementById('canvas-container').appendChild(renderer.domElement);
-  
-  const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
-  scene.add(ambientLight);
-  
-  const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
-  directionalLight.position.set(100, 200, 100);
-  directionalLight.castShadow = true;
-  directionalLight.shadow.mapSize.width = 2048;
-  directionalLight.shadow.mapSize.height = 2048;
-  directionalLight.shadow.camera.near = 0.5;
-  directionalLight.shadow.camera.far = 2000;
-  directionalLight.shadow.camera.left = -500;
-  directionalLight.shadow.camera.right = 500;
-  directionalLight.shadow.camera.top = 500;
-  directionalLight.shadow.camera.bottom = -500;
-  scene.add(directionalLight);
-  
-  createWorld();
-  createPlayerAvatar();
-  updateThirdPersonCamera();
-  
-  if (!isMobile) {
-    controls = new THREE.PointerLockControls(camera, document.body);
-    
-    document.addEventListener('click', function() {
-      if (!controls.isLocked && canMove) {
-        controls.lock();
-      }
-    });
-    
-    controls.addEventListener('lock', function() {
-      document.getElementById('instructions').style.display = 'none';
-    });
-    
-    controls.addEventListener('unlock', function() {
-      document.getElementById('instructions').style.display = 'block';
-    });
-    
-    const onKeyDown = function (event) {
-      if (!canMove) return;
-      
-      switch (event.code) {
-        case 'ArrowUp':
-        case 'KeyW':
-          moveForward = true;
-          break;
-        case 'ArrowLeft':
-        case 'KeyA':
-          moveLeft = true;
-          break;
-        case 'ArrowDown':
-        case 'KeyS':
-          moveBackward = true;
-          break;
-        case 'ArrowRight':
-        case 'KeyD':
-          moveRight = true;
-          break;
-        case 'Space':
-          shootBullet();
-          break;
-        case 'KeyB':
-          showBulletPurchaseModal();
-          break;
-      }
-    };
-    
-    const onKeyUp = function (event) {
-      switch (event.code) {
-        case 'ArrowUp':
-        case 'KeyW':
-          moveForward = false;
-          break;
-        case 'ArrowLeft':
-        case 'KeyA':
-          moveLeft = false;
-          break;
-        case 'ArrowDown':
-        case 'KeyS':
-          moveBackward = false;
-          break;
-        case 'ArrowRight':
-        case 'KeyD':
-          moveRight = false;
-          break;
-      }
-    };
-    
-    document.addEventListener('keydown', onKeyDown);
-    document.addEventListener('keyup', onKeyUp);
-    
-    document.addEventListener('mousemove', (event) => {
-      if (controls && controls.isLocked && canMove) {
-        targetCameraAngle -= event.movementX * 0.002;
-      }
-    });
-  }
-  
-  raycaster = new THREE.Raycaster();
-  mouse = new THREE.Vector2();
-  
-  window.addEventListener('resize', onWindowResize);
-  initMiniMap();
-  animate();
-}
-
-function updateThirdPersonCamera() {
-  if (!playerAvatar) return;
-  
-  cameraAngle += (targetCameraAngle - cameraAngle) * 0.1;
-  
-  const playerPosition = playerAvatar.position.clone();
-  const offset = new THREE.Vector3(
-    Math.sin(cameraAngle) * cameraDistance,
-    cameraHeight,
-    Math.cos(cameraAngle) * cameraDistance
-  );
-  
-  camera.position.copy(playerPosition).add(offset);
-  
-  const lookAtPosition = playerPosition.clone();
-  lookAtPosition.y += 3;
-  camera.lookAt(lookAtPosition);
-}
-
-function createWorld() {
-  const groundGeometry = new THREE.PlaneGeometry(worldSize, worldSize, 100, 100);
-  const groundMaterial = new THREE.MeshLambertMaterial({ 
-    color: 0x4ADE80,
-    side: THREE.DoubleSide
-  });
-  const ground = new THREE.Mesh(groundGeometry, groundMaterial);
-  ground.rotation.x = -Math.PI / 2;
-  ground.receiveShadow = true;
-  scene.add(ground);
-  
-  createCity();
-  createMoonBridge();
-  createUpperPlatform();
-  createBoundaryWalls();
-  createForSaleSign();
-}
-
-function createForSaleSign() {
-  const signGroup = new THREE.Group();
-  
-  const postGeometry = new THREE.CylinderGeometry(0.5, 0.5, 20, 8);
-  const postMaterial = new THREE.MeshLambertMaterial({ color: 0x8B4513 });
-  const post = new THREE.Mesh(postGeometry, postMaterial);
-  post.position.y = 10;
-  signGroup.add(post);
-  
-  const signGeometry = new THREE.PlaneGeometry(15, 8);
-  const signMaterial = new THREE.MeshLambertMaterial({ 
-    color: 0xFFD700,
-    side: THREE.DoubleSide
-  });
-  const sign = new THREE.Mesh(signGeometry, signMaterial);
-  sign.position.set(0, 20, 0);
-  sign.rotation.y = Math.PI / 4;
-  signGroup.add(sign);
-  
-  const canvas = document.createElement('canvas');
-  const context = canvas.getContext('2d');
-  canvas.width = 256;
-  canvas.height = 128;
-  
-  context.fillStyle = '#FFD700';
-  context.fillRect(0, 0, canvas.width, canvas.height);
-  
-  context.strokeStyle = '#8B4513';
-  context.lineWidth = 8;
-  context.strokeRect(4, 4, canvas.width - 8, canvas.height - 8);
-  
-  context.fillStyle = '#8B4513';
-  context.font = 'bold 40px Arial';
-  context.textAlign = 'center';
-  context.textBaseline = 'middle';
-  context.fillText('FOR SALE', canvas.width / 2, canvas.height / 2 - 15);
-  
-  context.font = 'bold 24px Arial';
-  context.fillText('$20,000', canvas.width / 2, canvas.height / 2 + 20);
-  
-  const texture = new THREE.CanvasTexture(canvas);
-  const textMaterial = new THREE.MeshBasicMaterial({ 
-    map: texture,
-    side: THREE.DoubleSide
-  });
-  const textMesh = new THREE.Mesh(signGeometry, textMaterial);
-  textMesh.position.set(0, 20, 0.1);
-  textMesh.rotation.y = Math.PI / 4;
-  signGroup.add(textMesh);
-  
-  const cornerX = worldBoundary - 50;
-  const cornerZ = worldBoundary - 50;
-  signGroup.position.set(cornerX, 0, cornerZ);
-  scene.add(signGroup);
-  
-  const signBox = new THREE.Box3().setFromObject(signGroup);
-  collisionObjects.push(signBox);
-}
-
-function createMoonBridge() {
-  const bridgeGroup = new THREE.Group();
-  const bridgeMaterial = new THREE.MeshLambertMaterial({ 
-    color: 0x00FFFF,
-    transparent: true,
-    opacity: 0.7
-  });
-  
-  const bridgeWidth = 20;
-  const bridgeHeight = 5;
-  const segments = 200;
-  bridgeSegments = [];
-  
-  for (let i = 0; i < segments; i++) {
-    const t = i / segments;
-    const nextT = (i + 1) / segments;
-    
-    const spiralTurns = 4;
-    const startRadius = 350;
-    const endRadius = 50;
-    const totalHeight = 750;
-    const radius = startRadius - (t * (startRadius - endRadius));
-    const angle = t * Math.PI * 2 * spiralTurns;
-    
-    const x1 = Math.cos(angle) * radius;
-    const z1 = Math.sin(angle) * radius;
-    const y1 = 0 + t * totalHeight;
-    
-    const nextAngle = nextT * Math.PI * 2 * spiralTurns;
-    const nextRadius = startRadius - (nextT * (startRadius - endRadius));
-    const x2 = Math.cos(nextAngle) * nextRadius;
-    const z2 = Math.sin(nextAngle) * nextRadius;
-    const y2 = 0 + nextT * totalHeight;
-    
-    const dx = x2 - x1;
-    const dy = y2 - y1;
-    const dz = z2 - z1;
-    const segmentLength = Math.sqrt(dx*dx + dy*dy + dz*dz);
-    
-    const segmentGeometry = new THREE.BoxGeometry(bridgeWidth, bridgeHeight, segmentLength);
-    const segment = new THREE.Mesh(segmentGeometry, bridgeMaterial);
-    
-    segment.position.set(
-      (x1 + x2) / 2,
-      (y1 + y2) / 2,
-      (z1 + z2) / 2
-    );
-    
-    segment.rotation.y = Math.atan2(dx, dz);
-    segment.rotation.x = -Math.atan2(dy, Math.sqrt(dx*dx + dz*dz));
-    segment.castShadow = true;
-    segment.receiveShadow = true;
-    bridgeGroup.add(segment);
-    bridgeSegments.push(segment);
-    
-    createBridgeGuardrails(bridgeGroup, x1, y1, z1, x2, y2, z2, segmentLength);
-  }
-  
-  scene.add(bridgeGroup);
-}
-
-function createBridgeGuardrails(bridgeGroup, x1, y1, z1, x2, y2, z2, segmentLength) {
-  const railGeometry = new THREE.BoxGeometry(1, 10, segmentLength);
-  const railMaterial = new THREE.MeshLambertMaterial({ color: 0x4B5563 });
-  
-  const dx = x2 - x1;
-  const dy = y2 - y1;
-  const dz = z2 - z1;
-  const length = Math.sqrt(dx*dx + dz*dz);
-  const perpX = -dz / length * 10.5;
-  const perpZ = dx / length * 10.5;
-  
-  const leftRail = new THREE.Mesh(railGeometry, railMaterial);
-  leftRail.position.set(
-    (x1 + x2) / 2 + perpX,
-    (y1 + y2) / 2 + 5,
-    (z1 + z2) / 2 + perpZ
-  );
-  leftRail.rotation.y = Math.atan2(dx, dz);
-  leftRail.rotation.x = -Math.atan2(dy, Math.sqrt(dx*dx + dz*dz));
-  leftRail.castShadow = true;
-  bridgeGroup.add(leftRail);
-  
-  const rightRail = new THREE.Mesh(railGeometry, railMaterial);
-  rightRail.position.set(
-    (x1 + x2) / 2 - perpX,
-    (y1 + y2) / 2 + 5,
-    (z1 + z2) / 2 - perpZ
-  );
-  rightRail.rotation.y = Math.atan2(dx, dz);
-  rightRail.rotation.x = -Math.atan2(dy, Math.sqrt(dx*dx + dz*dz));
-  rightRail.castShadow = true;
-  bridgeGroup.add(rightRail);
-  
-  const leftRailBox = new THREE.Box3().setFromObject(leftRail);
-  const rightRailBox = new THREE.Box3().setFromObject(rightRail);
-  collisionObjects.push(leftRailBox);
-  collisionObjects.push(rightRailBox);
-}
-
-function createBoundaryWalls() {
-  const wallHeight = 100;
-  const wallMaterial = new THREE.MeshLambertMaterial({ 
-    color: 0x374151,
-    transparent: true,
-    opacity: 0.7
-  });
-  
-  const wallGeometry = new THREE.PlaneGeometry(worldSize, wallHeight);
-  
-  const northWall = new THREE.Mesh(wallGeometry, wallMaterial);
-  northWall.position.set(0, wallHeight/2, -worldBoundary);
-  northWall.rotation.x = Math.PI / 2;
-  scene.add(northWall);
-  
-  const southWall = new THREE.Mesh(wallGeometry, wallMaterial);
-  southWall.position.set(0, wallHeight/2, worldBoundary);
-  southWall.rotation.x = -Math.PI / 2;
-  scene.add(southWall);
-  
-  const eastWall = new THREE.Mesh(wallGeometry, wallMaterial);
-  eastWall.position.set(worldBoundary, wallHeight/2, 0);
-  eastWall.rotation.x = Math.PI / 2;
-  eastWall.rotation.y = Math.PI / 2;
-  scene.add(eastWall);
-  
-  const westWall = new THREE.Mesh(wallGeometry, wallMaterial);
-  westWall.position.set(-worldBoundary, wallHeight/2, 0);
-  westWall.rotation.x = Math.PI / 2;
-  westWall.rotation.y = -Math.PI / 2;
-  scene.add(westWall);
-}
-
+// Ground + main city
 function createCity() {
   const cityGroup = new THREE.Group();
   const buildingColors = [0x3B82F6, 0xEF4444, 0x10B981, 0xF59E0B, 0x8B5CF6];
@@ -2278,26 +1864,25 @@ function createCity() {
 
       const buildingGeometry = new THREE.BoxGeometry(width, height, depth);
 
-      // NEW: Glass-like material with reflection & 60% transparency
       const buildingMaterial = new THREE.MeshPhysicalMaterial({
         color: buildingColors[Math.floor(Math.random() * buildingColors.length)],
         roughness: 0.1,
         metalness: 0.3,
-        transmission: 0.9,        // makes light pass through like real glass
-        thickness: 2.0,            // affects refraction depth
+        transmission: 0.9,
+        thickness: 2.0,
         clearcoat: 1.0,
         clearcoatRoughness: 0.0,
         transparent: true,
-        opacity: 0.6,              // ← your requested 60% see-through
+        opacity: 0.6,
         side: THREE.DoubleSide,
-        depthWrite: false          // critical for correct transparency sorting
+        depthWrite: false
       });
 
       const building = new THREE.Mesh(buildingGeometry, buildingMaterial);
       building.position.set(
-        (x - gridSize/2) * spacing,
+        (x - gridSize / 2) * spacing,
         height / 2,
-        (z - gridSize/2) * spacing - 100
+        (z - gridSize / 2) * spacing - 100
       );
 
       building.castShadow = true;
@@ -2307,26 +1892,28 @@ function createCity() {
 
       const buildingBox = new THREE.Box3().setFromObject(building);
       collisionObjects.push(buildingBox);
-      createBuildingRoof(building.position.x, building.position.y + height/2, building.position.z, width, depth);
+
+      createBuildingRoof(building.position.x, building.position.y + height / 2, building.position.z, width, depth);
     }
   }
   scene.add(cityGroup);
 }
 
+// Upper platform + smaller city on top of the bridge
 function createUpperPlatform() {
   const upperGroundGeometry = new THREE.PlaneGeometry(500, 500);
   const upperGroundMaterial = new THREE.MeshPhysicalMaterial({
-  color: 0x88ffaa, 
-  transparent: true,
-  opacity: 0.55,
-  transmission: 0.9,      // makes it actually refract light (very cool)
-  roughness: 0,
-  metalness: 0,
-  clearcoat: 1,
-  clearcoatRoughness: 0,
-  side: THREE.DoubleSide,
-  depthWrite: false
-});
+    color: 0x88ffaa,
+    transparent: true,
+    opacity: 0.55,
+    transmission: 0.9,
+    roughness: 0,
+    metalness: 0,
+    clearcoat: 1,
+    clearcoatRoughness: 0,
+    side: THREE.DoubleSide,
+    depthWrite: false
+  });
   const upperGround = new THREE.Mesh(upperGroundGeometry, upperGroundMaterial);
   upperGround.rotation.x = -Math.PI / 2;
   upperGround.position.set(50, 750, 0);
@@ -2355,16 +1942,16 @@ function createUpperPlatform() {
         clearcoat: 1.0,
         clearcoatRoughness: 0.0,
         transparent: true,
-        opacity: 0.6,           // ← 60% transparent
+        opacity: 0.6,
         side: THREE.DoubleSide,
         depthWrite: false
       });
 
       const building = new THREE.Mesh(buildingGeometry, buildingMaterial);
       building.position.set(
-        50 + (x - gridSize/2) * spacing,
+        50 + (x - gridSize / 2) * spacing,
         750 + height / 2,
-        0 + (z - gridSize/2) * spacing
+        (z - gridSize / 2) * spacing
       );
 
       building.castShadow = true;
@@ -2374,44 +1961,202 @@ function createUpperPlatform() {
 
       const buildingBox = new THREE.Box3().setFromObject(building);
       collisionObjects.push(buildingBox);
-      createBuildingRoof(building.position.x, building.position.y + height/2, building.position.z, width, depth);
+
+      createBuildingRoof(building.position.x, building.position.y + height / 2, building.position.z, width, depth);
     }
   }
   scene.add(upperCityGroup);
 }
 
+// Spiral moon bridge
+function createMoonBridge() {
+  const bridgeGroup = new THREE.Group();
+  const bridgeMaterial = new THREE.MeshLambertMaterial({
+    color: 0x00FFFF,
+    transparent: true,
+    opacity: 0.7
+  });
+
+  const bridgeWidth = 20;
+  const bridgeHeight = 5;
+  const segments = 200;
+  bridgeSegments = [];
+
+  for (let i = 0; i < segments; i++) {
+    const t = i / segments;
+    const nextT = (i + 1) / segments;
+
+    const spiralTurns = 4;
+    const startRadius = 350;
+    const endRadius = 50;
+    const totalHeight = 750;
+    const radius = startRadius - (t * (startRadius - endRadius));
+    const angle = t * Math.PI * 2 * spiralTurns;
+
+    const x1 = Math.cos(angle) * radius;
+    const z1 = Math.sin(angle) * radius;
+    const y1 = t * totalHeight;
+
+    const nextAngle = nextT * Math.PI * 2 * spiralTurns;
+    const nextRadius = startRadius - (nextT * (startRadius - endRadius));
+    const x2 = Math.cos(nextAngle) * nextRadius;
+    const z2 = Math.sin(nextAngle) * nextRadius;
+    const y2 = nextT * totalHeight;
+
+    const dx = x2 - x1;
+    const dy = y2 - y1;
+    const dz = z2 - z1;
+    const segmentLength = Math.sqrt(dx * dx + dy * dy + dz * dz);
+
+    const segmentGeometry = new THREE.BoxGeometry(bridgeWidth, bridgeHeight, segmentLength);
+    const segment = new THREE.Mesh(segmentGeometry, bridgeMaterial);
+
+    segment.position.set((x1 + x2) / 2, (y1 + y2) / 2, (z1 + z2) / 2);
+    segment.rotation.y = Math.atan2(dx, dz);
+    segment.rotation.x = -Math.atan2(dy, Math.sqrt(dx * dx + dz * dz));
+    segment.castShadow = true;
+    segment.receiveShadow = true;
+
+    bridgeGroup.add(segment);
+    bridgeSegments.push(segment);
+
+    createBridgeGuardrails(bridgeGroup, x1, y1, z1, x2, y2, z2, segmentLength);
+  }
+
+  scene.add(bridgeGroup);
+}
+
+function createBridgeGuardrails(bridgeGroup, x1, y1, z1, x2, y2, z2, segmentLength) {
+  const railGeometry = new THREE.BoxGeometry(1, 10, segmentLength);
+  const railMaterial = new THREE.MeshLambertMaterial({ color: 0x4B5563 });
+
+  const dx = x2 - x1;
+  const dz = z2 - z1;
+  const length = Math.sqrt(dx * dx + dz * dz);
+  const perpX = -dz / length * 10.5;
+  const perpZ = dx / length * 10.5;
+
+  // Left rail
+  const leftRail = new THREE.Mesh(railGeometry, railMaterial);
+  leftRail.position.set((x1 + x2) / 2 + perpX, (y1 + y2) / 2 + 5, (z1 + z2) / 2 + perpZ);
+  leftRail.rotation.y = Math.atan2(dx, dz);
+  leftRail.rotation.x = -Math.atan2(y2 - y1, Math.sqrt(dx * dx + dz * dz));
+  leftRail.castShadow = true;
+  bridgeGroup.add(leftRail);
+
+  // Right rail
+  const rightRail = new THREE.Mesh(railGeometry, railMaterial);
+  rightRail.position.set((x1 + x2) / 2 - perpX, (y1 + y2) / 2 + 5, (z1 + z2) / 2 - perpZ);
+  rightRail.rotation.y = Math.atan2(dx, dz);
+  rightRail.rotation.x = -Math.atan2(y2 - y1, Math.sqrt(dx * dx + dz * dz));
+  rightRail.castShadow = true;
+  bridgeGroup.add(rightRail);
+
+  collisionObjects.push(new THREE.Box3().setFromObject(leftRail));
+  collisionObjects.push(new THREE.Box3().setFromObject(rightRail));
+}
+
+// Flat roofs for landing / collision
 function createBuildingRoof(x, y, z, width, depth) {
   const roofGeometry = new THREE.PlaneGeometry(width, depth);
-  const roofMaterial = new THREE.MeshLambertMaterial({ 
-    color: 0x1F2937,
-    side: THREE.DoubleSide
-  });
-  
+  const roofMaterial = new THREE.MeshLambertMaterial({ color: 0x1F2937, side: THREE.DoubleSide });
+
   const roof = new THREE.Mesh(roofGeometry, roofMaterial);
   roof.position.set(x, y + 0.1, z);
   roof.rotation.x = Math.PI / 2;
   roof.receiveShadow = true;
   roof.castShadow = true;
   scene.add(roof);
-  
+
   const roofBox = new THREE.Box3().setFromCenterAndSize(
     new THREE.Vector3(x, y + 0.1, z),
     new THREE.Vector3(width, 0.2, depth)
   );
-  roofObjects.push({
-    box: roofBox,
-    position: new THREE.Vector3(x, y + 0.1, z),
-    width: width,
-    depth: depth
-  });
+  roofObjects.push({ box: roofBox, position: new THREE.Vector3(x, y + 0.1, z), width, depth });
   collisionObjects.push(roofBox);
 }
 
+// Boundary walls (invisible barriers)
+function createBoundaryWalls() {
+  const wallHeight = 100;
+  const wallMaterial = new THREE.MeshLambertMaterial({
+    color: 0x374151,
+    transparent: true,
+    opacity: 0.7
+  });
+
+  const wallGeometry = new THREE.PlaneGeometry(worldSize, wallHeight);
+
+  const northWall = new THREE.Mesh(wallGeometry, wallMaterial);
+  northWall.position.set(0, wallHeight / 2, -worldBoundary);
+  northWall.rotation.y = 0;
+  scene.add(northWall);
+
+  const southWall = new THREE.Mesh(wallGeometry, wallMaterial);
+  southWall.position.set(0, wallHeight / 2, worldBoundary);
+  southWall.rotation.y = Math.PI;
+  scene.add(southWall);
+
+  const eastWall = new THREE.Mesh(wallGeometry, wallMaterial);
+  eastWall.position.set(worldBoundary, wallHeight / 2, 0);
+  eastWall.rotation.y = Math.PI / 2;
+  scene.add(eastWall);
+
+  const westWall = new THREE.Mesh(wallGeometry, wallMaterial);
+  westWall.position.set(-worldBoundary, wallHeight / 2, 0);
+  westWall.rotation.y = -Math.PI / 2;
+  scene.add(westWall);
+}
+
+// For Sale sign in corner
+function createForSaleSign() {
+  const signGroup = new THREE.Group();
+
+  const postGeometry = new THREE.CylinderGeometry(0.5, 0.5, 20, 8);
+  const postMaterial = new THREE.MeshLambertMaterial({ color: 0x8B4513 });
+  const post = new THREE.Mesh(postGeometry, postMaterial);
+  post.position.y = 10;
+  signGroup.add(post);
+
+  const signGeometry = new THREE.PlaneGeometry(15, 8);
+  const canvas = document.createElement('canvas');
+  canvas.width = 256;
+  canvas.height = 128;
+  const context = canvas.getContext('2d');
+  context.fillStyle = '#FFD700';
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  context.strokeStyle = '#8B4513';
+  context.lineWidth = 8;
+  context.strokeRect(4, 4, canvas.width - 8, canvas.height - 8);
+  context.fillStyle = '#8B4513';
+  context.font = 'bold 40px Arial';
+  context.textAlign = 'center';
+  context.textBaseline = 'middle';
+  context.fillText('FOR SALE', canvas.width / 2, canvas.height / 2 - 15);
+  context.font = 'bold 24px Arial';
+  context.fillText('$20,000', canvas.width / 2, canvas.height / 2 + 20);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  const textMaterial = new THREE.MeshBasicMaterial({ map: texture, side: THREE.DoubleSide });
+  const textMesh = new THREE.Mesh(signGeometry, textMaterial);
+  textMesh.position.set(0, 20, 0.1);
+  textMesh.rotation.y = Math.PI / 4;
+  signGroup.add(textMesh);
+
+  const cornerX = worldBoundary - 50;
+  const cornerZ = worldBoundary - 50;
+  signGroup.position.set(cornerX, 0, cornerZ);
+  scene.add(signGroup);
+
+  collisionObjects.push(new THREE.Box3().setFromObject(signGroup));
+}
+
+// Player hoverboard avatar
 function createPlayerAvatar() {
   const group = new THREE.Group();
-  
+
   const boardGeometry = new THREE.PlaneGeometry(10, 10);
-  const boardMaterial = new THREE.MeshStandardMaterial({ 
+  const boardMaterial = new THREE.MeshStandardMaterial({
     color: multiplayer ? multiplayer.playerColor : 0xC0C0C0,
     metalness: 0.8,
     roughness: 0.2,
@@ -2422,9 +2167,9 @@ function createPlayerAvatar() {
   hoverBoard.castShadow = true;
   hoverBoard.receiveShadow = true;
   group.add(hoverBoard);
-  
+
   const underglowGeometry = new THREE.PlaneGeometry(10.5, 10.5);
-  const underglowMaterial = new THREE.MeshBasicMaterial({ 
+  const underglowMaterial = new THREE.MeshBasicMaterial({
     color: 0x00FF00,
     transparent: true,
     opacity: 0.7,
@@ -2434,292 +2179,395 @@ function createPlayerAvatar() {
   underglow.rotation.x = -Math.PI / 2;
   underglow.position.y = -0.1;
   group.add(underglow);
-  
+
   let avatar;
   if (selectedAvatar === 'boy') {
-    const bodyGeometry = new THREE.CylinderGeometry(0.5, 0.5, 1.5, 8);
-    const bodyMaterial = new THREE.MeshLambertMaterial({ color: 0x3B82F6 });
-    const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
+    const body = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.5, 0.5, 1.5, 8),
+      new THREE.MeshLambertMaterial({ color: 0x3B82F6 })
+    );
     body.position.y = 1.5;
-    
-    const headGeometry = new THREE.SphereGeometry(0.6, 8, 8);
-    const headMaterial = new THREE.MeshLambertMaterial({ color: 0xFCD34D });
-    const head = new THREE.Mesh(headGeometry, headMaterial);
+    const head = new THREE.Mesh(
+      new THREE.SphereGeometry(0.6, 8, 8),
+      new THREE.MeshLambertMaterial({ color: 0xFCD34D })
+    );
     head.position.y = 2.8;
-    
     avatar = new THREE.Group();
-    avatar.add(body);
-    avatar.add(head);
+    avatar.add(body, head);
   } else if (selectedAvatar === 'girl') {
-    const bodyGeometry = new THREE.CylinderGeometry(0.5, 0.5, 1.5, 8);
-    const bodyMaterial = new THREE.MeshLambertMaterial({ color: 0xEC4899 });
-    const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
+    const body = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.5, 0.5, 1.5, 8),
+      new THREE.MeshLambertMaterial({ color: 0xEC4899 })
+    );
     body.position.y = 1.5;
-    
-    const headGeometry = new THREE.SphereGeometry(0.6, 8, 8);
-    const headMaterial = new THREE.MeshLambertMaterial({ color: 0xFCD34D });
-    const head = new THREE.Mesh(headGeometry, headMaterial);
+    const head = new THREE.Mesh(
+      new THREE.SphereGeometry(0.6, 8, 8),
+      new THREE.MeshLambertMaterial({ color: 0xFCD34D })
+    );
     head.position.y = 2.8;
-    
     avatar = new THREE.Group();
-    avatar.add(body);
-    avatar.add(head);
+    avatar.add(body, head);
   }
-  
+
   if (avatar) {
     avatar.position.y = 0.1;
-    avatar.castShadow = true;
     group.add(avatar);
   }
-  
+
   group.position.set(-150, hoverHeight, -150);
-  group.castShadow = true;
   scene.add(group);
   playerAvatar = group;
+
+  // Ensure code that expects window.playerAvatar works
+  window.playerAvatar = playerAvatar;
 }
 
+// NFT floating platforms
 function createNFTPlatform(x, y, z) {
   const platformGeometry = new THREE.CylinderGeometry(6, 6, 0.5, 16);
-  const platformMaterial = new THREE.MeshLambertMaterial({ 
+  const platformMaterial = new THREE.MeshLambertMaterial({
     color: 0x2a2a5a,
     transparent: true,
     opacity: 0.8
   });
-  
+
   const platform = new THREE.Mesh(platformGeometry, platformMaterial);
   platform.position.set(x, y - 4, z);
   platform.receiveShadow = true;
   scene.add(platform);
-  
+
   const platformBox = new THREE.Box3().setFromObject(platform);
   collisionObjects.push(platformBox);
   nftPlatforms.push(platform);
-  return platform;
 }
 
+// Mini-map
 function initMiniMap() {
   miniMapScene = new THREE.Scene();
-  miniMapCamera = new THREE.OrthographicCamera(-worldSize/2, worldSize/2, worldSize/2, -worldSize/2, 0.1, 2000);
+  miniMapCamera = new THREE.OrthographicCamera(-worldSize / 2, worldSize / 2, worldSize / 2, -worldSize / 2, 0.1, 2000);
   miniMapCamera.position.y = 500;
   miniMapCamera.lookAt(0, 0, 0);
-  
+
   const miniMapCanvas = document.createElement('canvas');
   miniMapCanvas.width = 120;
   miniMapCanvas.height = 120;
   document.getElementById('mini-map').appendChild(miniMapCanvas);
-  
-  miniMapRenderer = new THREE.WebGLRenderer({ 
-    canvas: miniMapCanvas,
-    antialias: false 
-  });
+
+  miniMapRenderer = new THREE.WebGLRenderer({ canvas: miniMapCanvas, antialias: false });
   miniMapRenderer.setSize(120, 120);
   miniMapRenderer.setClearColor(0x000000, 0.5);
-  
+
   const groundGeometry = new THREE.PlaneGeometry(worldSize, worldSize);
   const groundMaterial = new THREE.MeshBasicMaterial({ color: 0x4ADE80 });
   const ground = new THREE.Mesh(groundGeometry, groundMaterial);
   ground.rotation.x = -Math.PI / 2;
   miniMapScene.add(ground);
-  
+
   const playerGeometry = new THREE.CircleGeometry(10, 8);
-  const playerMaterial = new THREE.MeshBasicMaterial({ 
-    color: multiplayer ? multiplayer.playerColor : 0xFF0000 
-  });
+  const playerMaterial = new THREE.MeshBasicMaterial({ color: multiplayer ? multiplayer.playerColor : 0xFF0000 });
   const playerIndicator = new THREE.Mesh(playerGeometry, playerMaterial);
   playerIndicator.rotation.x = -Math.PI / 2;
   miniMapScene.add(playerIndicator);
-  
+
   const otherPlayerGeometry = new THREE.CircleGeometry(8, 6);
   const otherPlayerMaterial = new THREE.MeshBasicMaterial({ color: 0xFF6B6B });
-  
-  window.updateMiniMap = function() {
-    playerIndicator.position.x = playerAvatar.position.x;
-    playerIndicator.position.z = playerAvatar.position.z;
-    
+
+  window.updateMiniMap = function () {
+    playerIndicator.position.set(playerAvatar.position.x, 0, playerAvatar.position.z);
+
     if (playerAvatar) {
       playerAvatar.rotation.y = cameraAngle + Math.PI;
     }
-    
-    updateLocationInfo();
-    
+
+    // Clear old NFT indicators
     miniMapScene.children.forEach((child, index) => {
-      if (child.userData && child.userData.isNFTIndicator) {
-        miniMapScene.children.splice(index, 1);
+      if (child.userData?.isNFTIndicator) {
+        miniMapScene.remove(child);
       }
     });
-    
+
+    // Add NFT dots
     nftObjects.forEach(nft => {
       const indicator = new THREE.Mesh(otherPlayerGeometry, otherPlayerMaterial);
-      indicator.position.x = nft.position.x;
-      indicator.position.z = nft.position.z;
+      indicator.position.set(nft.position.x, 0, nft.position.z);
       indicator.rotation.x = -Math.PI / 2;
       indicator.userData = { isNFTIndicator: true };
       miniMapScene.add(indicator);
     });
-    
+
     miniMapRenderer.render(miniMapScene, miniMapCamera);
   };
 }
 
-function updateLocationInfo() {
-  const locationDisplay = document.getElementById('location-display');
-  const x = playerAvatar.position.x;
-  const z = playerAvatar.position.z;
-  const y = playerAvatar.position.y;
-  const isOnBridge = checkIfOnBridge(playerAvatar.position);
-  
-  if (isOnBridge) {
-    locationDisplay.textContent = "Spiral Bridge (Floating)";
-  } else if (x > -200 && x < 200 && z > -200 && z < 200) {
-    locationDisplay.textContent = "City Center (Floating)";
-  } else if (y > 100 && y < 700) {
-    locationDisplay.textContent = "NFT Column (Floating)";
-  } else if (y >= 700) {
-    locationDisplay.textContent = "Upper City (Floating)";
-  } else if (x < -100 && z < -100) {
-    locationDisplay.textContent = "Starting Area (Floating)";
-  } else if (x > worldBoundary - 100 && z > worldBoundary - 100) {
-    locationDisplay.textContent = "For Sale Corner (Floating)";
-  } else {
-    locationDisplay.textContent = "Grass Fields (Floating)";
-  }
-}
-
-function onWindowResize() {
-  camera.aspect = window.innerWidth / window.innerHeight;
-  camera.updateProjectionMatrix();
-  renderer.setSize(window.innerWidth, window.innerHeight);
-}
-
+// Helper: is player on bridge?
 function checkIfOnBridge(position) {
-  for (let i = 0; i < bridgeSegments.length; i++) {
-    const segment = bridgeSegments[i];
+  for (const segment of bridgeSegments) {
     const distance = position.distanceTo(segment.position);
-    if (distance < 30 && Math.abs(position.y - segment.position.y) < 15) {
+    if (distance < 40 && Math.abs(position.y - segment.position.y) < 20) {
       return true;
     }
   }
   return false;
 }
 
+// Helper: is player on upper platform?
 function checkIfOnUpper(position) {
-  const upperXMin = 50 - 250;
-  const upperXMax = 50 + 250;
-  const upperZMin = -250;
-  const upperZMax = 250;
-  return position.x >= upperXMin && position.x <= upperXMax &&
-         position.z >= upperZMin && position.z <= upperZMax &&
-         Math.abs(position.y - 750) < 50;
+  return position.y > 700 && position.y < 800 &&
+         position.x > -200 && position.x < 300 &&
+         position.z > -300 && position.z < 300;
 }
 
+// Collision detection
 function checkCollisions(newPosition) {
   playerCollider.setFromCenterAndSize(
     new THREE.Vector3(newPosition.x, newPosition.y, newPosition.z),
     playerSize
   );
-  
-  const isOnBridge = checkIfOnBridge(newPosition);
-  if (isOnBridge) return false;
-  
-  for (let i = 0; i < collisionObjects.length; i++) {
-    if (playerCollider.intersectsBox(collisionObjects[i])) {
+
+  for (const obj of collisionObjects) {
+    if (playerCollider.intersectsBox(obj)) {
       return true;
     }
   }
   return false;
 }
 
+// Window resize
+function onWindowResize() {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+     }
+
+/* ==============================
+   3D SCENE SETUP
+============================== */
+
+function init3DScene() {
+  // Scene setup
+  scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x000033);
+  scene.fog = new THREE.FogExp2(0x000033, 0.0008);
+
+  // Camera
+  camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 5000);
+
+  // Renderer
+  renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  document.getElementById('canvas-container').appendChild(renderer.domElement);
+
+  // Lighting
+  const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+  scene.add(ambientLight);
+
+  const directionalLight = new THREE.DirectionalLight(0xffffff, 1.0);
+  directionalLight.position.set(100, 300, 100);
+  directionalLight.castShadow = true;
+  directionalLight.shadow.mapSize.width = 2048;
+  directionalLight.shadow.mapSize.height = 2048;
+  directionalLight.shadow.camera.near = 0.5;
+  directionalLight.shadow.camera.far = 2000;
+  directionalLight.shadow.camera.left = -600;
+  directionalLight.shadow.camera.right = 600;
+  directionalLight.shadow.camera.top = 600;
+  directionalLight.shadow.camera.bottom = -600;
+  scene.add(directionalLight);
+
+  // World creation
+  createWorld();
+
+  // Player avatar
+  createPlayerAvatar();
+
+  // Initial camera position
+  updateThirdPersonCamera();
+
+  // Controls (desktop)
+  if (!isMobile) {
+    controls = new THREE.PointerLockControls(camera, document.body);
+
+    document.addEventListener('click', () => {
+      if (!controls.isLocked && canMove) {
+        controls.lock();
+      }
+    });
+
+    controls.addEventListener('lock', () => {
+      document.getElementById('instructions').style.display = 'none';
+    });
+
+    controls.addEventListener('unlock', () => {
+      document.getElementById('instructions').style.display = 'block';
+    });
+
+    // Keyboard controls
+    const onKeyDown = (event) => {
+      if (!canMove) return;
+      switch (event.code) {
+        case 'KeyW': case 'ArrowUp':    moveForward = true; break;
+        case 'KeyA': case 'ArrowLeft':  moveLeft = true; break;
+        case 'KeyS': case 'ArrowDown':  moveBackward = true; break;
+        case 'KeyD': case 'ArrowRight': moveRight = true; break;
+        case 'Space':                   shootBullet(); break;
+        case 'KeyB':                    showBulletPurchaseModal(); break;
+      }
+    };
+
+    const onKeyUp = (event) => {
+      switch (event.code) {
+        case 'KeyW': case 'ArrowUp':    moveForward = false; break;
+        case 'KeyA': case 'ArrowLeft':  moveLeft = false; break;
+        case 'KeyS': case 'ArrowDown':  moveBackward = false; break;
+        case 'KeyD': case 'ArrowRight': moveRight = false; break;
+      }
+    };
+
+    document.addEventListener('keydown', onKeyDown);
+    document.addEventListener('keyup', onKeyUp);
+
+    // Mouse look
+    document.addEventListener('mousemove', (e) => {
+      if (controls.isLocked && canMove) {
+        targetCameraAngle -= e.movementX * 0.002;
+      }
+    });
+  }
+
+  // Raycaster for interaction
+  raycaster = new THREE.Raycaster();
+  mouse = new THREE.Vector2();
+
+  // Events
+  window.addEventListener('resize', onWindowResize);
+
+  // Mini-map
+  initMiniMap();
+
+  // Start animation loop
+  clock = new THREE.Clock();
+  animate();
+}
+
+function updateThirdPersonCamera() {
+  if (!playerAvatar) return;
+
+  // Smoothly interpolate camera angle
+  cameraAngle += (targetCameraAngle - cameraAngle) * 0.1;
+
+  const pos = playerAvatar.position;
+  const offset = new THREE.Vector3(
+    Math.sin(cameraAngle) * cameraDistance,
+    cameraHeight,
+    Math.cos(cameraAngle) * cameraDistance
+  );
+
+  camera.position.copy(pos).add(offset);
+  camera.lookAt(pos.x, pos.y + 3, pos.z);
+}
+
+function createWorld() {
+  // Ground
+  const groundGeometry = new THREE.PlaneGeometry(worldSize, worldSize);
+  const groundMaterial = new THREE.MeshLambertMaterial({ color: 0x4ADE80 });
+  const ground = new THREE.Mesh(groundGeometry, groundMaterial);
+  ground.rotation.x = -Math.PI / 2;
+  ground.receiveShadow = true;
+  scene.add(ground);
+
+  // City, bridge, upper platform, boundaries, etc.
+  createCity();
+  createMoonBridge();
+  createUpperPlatform();
+  createBoundaryWalls();
+  createForSaleSign();
+}
+
 function animate() {
   requestAnimationFrame(animate);
-  
-  const time = performance.now();
-  const delta = (time - prevTime) / 1000;
+
+  const delta = clock.getDelta();
   hoverTime += delta;
-  
-  if (((controls && controls.isLocked) || isMobile) && canMove) {
-    const moveSpeed = 200.0 * delta;
-    const currentPosition = playerAvatar.position.clone();
-    const newPosition = currentPosition.clone();
-    
-    const forward = new THREE.Vector3(
-      Math.sin(cameraAngle),
-      0,
-      Math.cos(cameraAngle)
-    );
-    const right = new THREE.Vector3(
-      Math.sin(cameraAngle + Math.PI/2),
-      0,
-      Math.cos(cameraAngle + Math.PI/2)
-    );
-    
-    if (moveForward) newPosition.add(forward.clone().multiplyScalar(moveSpeed));
-    if (moveBackward) newPosition.sub(forward.clone().multiplyScalar(moveSpeed));
-    if (moveLeft) newPosition.sub(right.clone().multiplyScalar(moveSpeed));
-    if (moveRight) newPosition.add(right.clone().multiplyScalar(moveSpeed));
-    
-    const isOnBridge = checkIfOnBridge(newPosition);
-    const isOnUpperPlatform = checkIfOnUpper(newPosition);
-    
-    if (isOnBridge) {
-      let bridgeHeight = 0;
-      for (let i = 0; i < bridgeSegments.length; i++) {
-        const segment = bridgeSegments[i];
-        const distance = newPosition.distanceTo(segment.position);
-        if (distance < 30) {
-          bridgeHeight = segment.position.y;
+
+  // Player movement
+  if (((controls && controls.isLocked) || isMobile) && canMove && playerAvatar) {
+    const moveSpeed = 200 * delta;
+
+    const forward = new THREE.Vector3(Math.sin(cameraAngle), 0, Math.cos(cameraAngle));
+    const right = new THREE.Vector3(Math.sin(cameraAngle + Math.PI / 2), 0, Math.cos(cameraAngle + Math.PI / 2));
+
+    const direction = new THREE.Vector3();
+    if (moveForward) direction.add(forward);
+    if (moveBackward) direction.sub(forward);
+    if (moveLeft) direction.sub(right);
+    if (moveRight) direction.add(right);
+
+    if (direction.lengthSq() > 0) direction.normalize();
+
+    const newPos = playerAvatar.position.clone().add(direction.multiplyScalar(moveSpeed));
+
+    // Determine desired Y based on location
+    let targetY = hoverHeight;
+
+    if (checkIfOnBridge(newPos)) {
+      // Find nearest bridge segment Y
+      let closestY = hoverHeight;
+      for (const seg of bridgeSegments) {
+        if (newPos.distanceTo(seg.position) < 40) {
+          closestY = seg.position.y;
           break;
         }
       }
-      newPosition.y = bridgeHeight + hoverHeight + (Math.sin(hoverTime * hoverBobSpeed) * hoverBobAmount);
-    } else if (isOnUpperPlatform) {
-      newPosition.y = 750 + hoverHeight + (Math.sin(hoverTime * hoverBobSpeed) * hoverBobAmount);
-    } else {
-      const hoverBob = Math.sin(hoverTime * hoverBobSpeed) * hoverBobAmount;
-      newPosition.y = hoverHeight + hoverBob;
+      targetY = closestY + hoverHeight;
+    } else if (checkIfOnUpper(newPos)) {
+      targetY = 750 + hoverHeight;
     }
-    
-    if (velocity.y !== 0) {
-      velocity.y -= 9.8 * 100.0 * delta;
-      newPosition.y += (velocity.y * delta);
-      
-      if (newPosition.y <= hoverHeight + (Math.sin(hoverTime * hoverBobSpeed) * hoverBobAmount) && velocity.y < 0 && !isOnBridge) {
-        velocity.y = 0;
-        canJump = true;
-      }
+
+    // Apply hover bob
+    targetY += Math.sin(hoverTime * hoverBobSpeed) * hoverBobAmount;
+
+    newPos.y = targetY;
+
+    // Collision check
+    if (!checkCollisions(newPos)) {
+      playerAvatar.position.copy(newPos);
     }
-    
-    if (!checkCollisions(newPosition)) {
-      playerAvatar.position.copy(newPosition);
-    } else {
-      playerAvatar.position.copy(currentPosition);
-    }
-    
-    if (playerAvatar.position.x > worldBoundary) playerAvatar.position.x = worldBoundary;
-    if (playerAvatar.position.x < -worldBoundary) playerAvatar.position.x = -worldBoundary;
-    if (playerAvatar.position.z > worldBoundary) playerAvatar.position.z = worldBoundary;
-    if (playerAvatar.position.z < -worldBoundary) playerAvatar.position.z = -worldBoundary;
+
+    // World boundary clamp
+    playerAvatar.position.x = Math.max(-worldBoundary, Math.min(worldBoundary, playerAvatar.position.x));
+    playerAvatar.position.z = Math.max(-worldBoundary, Math.min(worldBoundary, playerAvatar.position.z));
   }
-  
-  if (isMobile && (lookX !== 0 || lookY !== 0) && canMove) {
-    targetCameraAngle -= lookX * 0.01;
-    cameraHeight = Math.max(5, Math.min(20, cameraHeight - lookY * 0.1));
+
+  // Mobile look
+  if (isMobile && canMove) {
+    if (lookX !== 0 || lookY !== 0) {
+      targetCameraAngle -= lookX * 0.01;
+      cameraHeight = Math.max(5, Math.min(30, cameraHeight - lookY * 0.1));
+      lookX = lookY = 0;
+    }
   }
-  
+
+  // Update systems
   updateThirdPersonCamera();
   updateBullets();
   checkNFTInteraction();
   updateNFTLOD();
-  
-  // Update bots
-  if (botManager) {
-    botManager.update();
+
+  // Bots
+  if (botManager) botManager.update();
+
+  // Mini-map
+  if (window.updateMiniMap) window.updateMiniMap();
+
+  // Multiplayer position broadcast (throttled)
+  const now = performance.now();
+  if (now - lastSendTime > 100) {
+    sendPositionUpdate();
+    lastSendTime = now;
   }
-  
-  if (window.updateMiniMap) {
-    window.updateMiniMap();
-  }
-  
-  prevTime = time;
+
   renderer.render(scene, camera);
 }
 
@@ -2776,7 +2624,33 @@ function checkNFTInteraction() {
     if (!isMobile) document.body.style.cursor = 'auto';
   }
 }
+/* ==============================
+   NFT LEVEL OF DETAIL (LOD) SYSTEM
+============================== */
+function updateNFTLOD() {
+  if (!camera || nftObjects.length === 0) return;
 
+  const nearDistance = 150;
+  const farDistance = 400;
+
+  nftObjects.forEach(nft => {
+    const distance = camera.position.distanceTo(nft.position);
+
+    if (distance < nearDistance) {
+      if (nft.material) nft.material.opacity = 0.9;
+      if (nft.userData.glow) nft.userData.glow.visible = true;
+    } else if (distance < farDistance) {
+      if (nft.material) nft.material.opacity = 0.6;
+      if (nft.userData.glow) {
+        nft.userData.glow.visible = true;
+        nft.userData.glow.material.opacity = 0.2;
+      }
+    } else {
+      if (nft.material) nft.material.opacity = 0.3;
+      if (nft.userData.glow) nft.userData.glow.visible = false;
+    }
+  });
+}
 function isNFTBlockedByBuilding(nft) {
   const raycaster = new THREE.Raycaster();
   const direction = new THREE.Vector3();
@@ -2883,28 +2757,34 @@ function initSidebar() {
   const sidebar = document.getElementById('sidebar');
   const toggleButton = document.getElementById('sidebar-toggle');
   const modalOverlay = document.querySelector('.modal-overlay');
-  
+
+  // Defensive checks so missing DOM nodes don't throw.
+  if (!sidebar || !toggleButton || !modalOverlay) {
+    console.warn('initSidebar: missing sidebar DOM elements. Sidebar interactions will be disabled until elements exist.');
+    return;
+  }
+
   toggleButton.addEventListener('click', (e) => {
     e.stopPropagation();
     const isActive = sidebar.classList.toggle('active');
     canMove = !isActive;
     modalOverlay.classList.toggle('active', isActive);
-    
+
     if (isActive && controls && controls.isLocked) {
       controls.unlock();
     }
   });
-  
+
   document.addEventListener('click', (e) => {
-    if (sidebar.classList.contains('active') && 
-        !sidebar.contains(e.target) && 
+    if (sidebar.classList.contains('active') &&
+        !sidebar.contains(e.target) &&
         e.target !== toggleButton) {
       sidebar.classList.remove('active');
       canMove = true;
       modalOverlay.classList.remove('active');
     }
   });
-  
+
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && sidebar.classList.contains('active')) {
       sidebar.classList.remove('active');
@@ -2912,7 +2792,7 @@ function initSidebar() {
       modalOverlay.classList.remove('active');
     }
   });
-  
+
   initStatsTracking();
 }
 
@@ -3086,567 +2966,218 @@ function removeChatMessage(playerId) {
 }
 
 /* ==============================
-   MULTIPLAYER SYSTEM - UPDATED CHAT HANDLING
+   AVATAR SELECTION + ROOM JOIN + GAME START (COMBINED & SIMPLIFIED)
 ============================== */
+function setupAvatarSelectionAndGameStart() {
+  const avatarOptions = document.querySelectorAll('.avatar-option');
+  const confirmButton = document.getElementById('confirm-avatar');
+  const nameInput = document.getElementById('player-name');
 
-class WebRTCMultiplayer {
-  constructor() {
-    this.peers = new Map();
-    this.otherPlayers = new Map();
-    this.roomId = 'nft-universe-main';
-    this.playerId = this.generatePlayerId();
-    this.playerName = 'Explorer';
-    this.playerColor = 0x3B82F6;
-    this.signalingChannel = null;
-    this.dataChannels = new Map();
-    
-    this.init();
-  }
+  // Avatar selection UI
+  avatarOptions.forEach(option => {
+    option.addEventListener('click', () => {
+      avatarOptions.forEach(opt => opt.classList.remove('selected'));
+      option.classList.add('selected');
+      selectedAvatar = option.getAttribute('data-avatar');
+    });
+  });
 
-  generatePlayerId() {
-    if (!localStorage.getItem('playerId')) {
-      localStorage.setItem('playerId', 'player-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9));
+  // Confirm button → join room → start game
+  confirmButton.addEventListener('click', async () => {
+    if (!selectedAvatar) {
+      alert('Please select an avatar to continue');
+      return;
     }
-    return localStorage.getItem('playerId');
-  }
 
-  async init() {
-    this.setupSignaling();
-    this.setupChat();
-    
-    const nameInput = document.getElementById('player-name');
-    if (nameInput) {
-      nameInput.addEventListener('input', (e) => {
-        this.playerName = e.target.value.trim() || 'Explorer';
-      });
+    // Set player info
+    multiplayer.playerId = generatePlayerId();
+    multiplayer.playerName = nameInput && nameInput.value.trim() ? nameInput.value.trim() : 'Explorer';
+    multiplayer.playerColor = Math.floor(Math.random() * 0xFFFFFF);
+
+    // Determine or create room ID
+    const urlParams = new URLSearchParams(window.location.search);
+    let roomId = urlParams.get('room');
+    if (!roomId) {
+      roomId = `game-room-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
     }
-  }
+    multiplayer.currentRoomId = roomId;
 
-  setupSignaling() {
-    try {
-      this.signalingChannel = new BroadcastChannel('nft-universe-webrtc');
-      
-      this.signalingChannel.addEventListener('message', async (event) => {
-        const message = event.data;
-        
-        if (message.roomId !== this.roomId || message.playerId === this.playerId) return;
-        
-        switch (message.type) {
-          case 'player-join':
-            await this.handlePlayerJoin(message);
-            break;
-          case 'offer':
-            await this.handleOffer(message);
-            break;
-          case 'answer':
-            await this.handleAnswer(message);
-            break;
-          case 'ice-candidate':
-            await this.handleIceCandidate(message);
-            break;
-          case 'player-data':
-            this.handlePlayerData(message);
-            break;
-          case 'player-left':
-            this.handlePlayerLeft(message);
-            break;
-          case 'chat-message':
-            this.handleChatMessage(message);
-            break;
-        }
-      });
+    // Hide avatar screen immediately
+    document.getElementById('avatar-selection').style.display = 'none';
 
-      this.broadcastSignal({
-        type: 'player-join',
-        playerId: this.playerId,
-        playerData: this.getPlayerData()
-      });
-
-    } catch (error) {
-      console.log('BroadcastChannel not supported, using localStorage fallback');
-      this.setupLocalStorageSignaling();
-    }
-  }
-
-  setupLocalStorageSignaling() {
-    setInterval(() => {
-      const signals = JSON.parse(localStorage.getItem('nft-universe-signals') || '[]');
-      const newSignals = [];
-      
-      signals.forEach(signal => {
-        if (signal.roomId === this.roomId && signal.playerId !== this.playerId) {
-          this.handleSignalingMessage(signal);
-        } else {
-          newSignals.push(signal);
-        }
-      });
-      
-      localStorage.setItem('nft-universe-signals', JSON.stringify(newSignals));
-    }, 1000);
-  }
-
-  broadcastSignal(message) {
-    message.roomId = this.roomId;
-    message.playerId = this.playerId;
-    message.timestamp = Date.now();
-    
-    if (this.signalingChannel) {
-      this.signalingChannel.postMessage(message);
-    } else {
-      const signals = JSON.parse(localStorage.getItem('nft-universe-signals') || '[]');
-      signals.push(message);
-      localStorage.setItem('nft-universe-signals', JSON.stringify(signals));
-    }
-  }
-
-  async handlePlayerJoin(message) {
-    console.log('Player joined:', message.playerId);
-    await this.createPeerConnection(message.playerId);
-  }
-
-  async createPeerConnection(peerId) {
-    const configuration = {
-      iceServers: [
-        { urls: 'stun:stun.l.google.com:19302' },
-        { urls: 'stun:stun1.l.google.com:19302' }
-      ]
-    };
-
-    const peerConnection = new RTCPeerConnection(configuration);
-    const dataChannel = peerConnection.createDataChannel('nft-universe', {
-      ordered: true
+    // === Create and join Supabase channel ===
+    multiplayer.gameChannel = client.channel(roomId, {
+      config: {
+        presence: { key: multiplayer.playerId },
+        broadcast: { self: false }
+      }
     });
 
-    this.setupDataChannel(dataChannel, peerId);
-
-    peerConnection.onicecandidate = (event) => {
-      if (event.candidate) {
-        this.broadcastSignal({
-          type: 'ice-candidate',
-          to: peerId,
-          candidate: event.candidate
-        });
-      }
-    };
-
-    peerConnection.ondatachannel = (event) => {
-      this.setupDataChannel(event.channel, peerId);
-    };
-
-    const offer = await peerConnection.createOffer();
-    await peerConnection.setLocalDescription(offer);
-
-    this.broadcastSignal({
-      type: 'offer',
-      to: peerId,
-      offer: offer
-    });
-
-    this.peers.set(peerId, peerConnection);
-    this.dataChannels.set(peerId, dataChannel);
-  }
-
-  async handleOffer(message) {
-    const configuration = {
-      iceServers: [
-        { urls: 'stun:stun.l.google.com:19302' },
-        { urls: 'stun:stun1.l.google.com:19302' }
-      ]
-    };
-
-    const peerConnection = new RTCPeerConnection(configuration);
-
-    peerConnection.onicecandidate = (event) => {
-      if (event.candidate) {
-        this.broadcastSignal({
-          type: 'ice-candidate',
-          to: message.playerId,
-          candidate: event.candidate
-        });
-      }
-    };
-
-    peerConnection.ondatachannel = (event) => {
-      this.setupDataChannel(event.channel, message.playerId);
-    };
-
-    await peerConnection.setRemoteDescription(message.offer);
-    const answer = await peerConnection.createAnswer();
-    await peerConnection.setLocalDescription(answer);
-
-    this.broadcastSignal({
-      type: 'answer',
-      to: message.playerId,
-      answer: answer
-    });
-
-    this.peers.set(message.playerId, peerConnection);
-  }
-
-  async handleAnswer(message) {
-    const peerConnection = this.peers.get(message.playerId);
-    if (peerConnection) {
-      await peerConnection.setRemoteDescription(message.answer);
-    }
-  }
-
-  async handleIceCandidate(message) {
-    const peerConnection = this.peers.get(message.playerId);
-    if (peerConnection && message.candidate) {
-      await peerConnection.addIceCandidate(message.candidate);
-    }
-  }
-
-  setupDataChannel(dataChannel, peerId) {
-    dataChannel.onopen = () => {
-      console.log('Data channel connected to', peerId);
-      this.sendPlayerData(peerId);
-    };
-
-    dataChannel.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
-        this.handlePlayerData(data);
-      } catch (error) {
-        console.error('Error parsing message:', error);
-      }
-    };
-
-    dataChannel.onclose = () => {
-      console.log('Data channel closed with', peerId);
-      this.handlePlayerLeft({ playerId: peerId });
-    };
-
-    this.dataChannels.set(peerId, dataChannel);
-  }
-
-  getPlayerData() {
-    return {
-      name: this.playerName,
-      color: this.playerColor,
-      avatar: window.selectedAvatar,
-      position: window.playerAvatar ? {
-        x: window.playerAvatar.position.x,
-        y: window.playerAvatar.position.y,
-        z: window.playerAvatar.position.z,
-        rotation: window.playerAvatar.rotation.y
-      } : { x: -150, y: 3, z: -150, rotation: 0 }
-    };
-  }
-
-  sendPlayerData(toPeerId = null) {
-    const playerData = {
-      type: 'player-data',
-      playerId: this.playerId,
-      data: this.getPlayerData()
-    };
-
-    if (toPeerId) {
-      const dataChannel = this.dataChannels.get(toPeerId);
-      if (dataChannel && dataChannel.readyState === 'open') {
-        dataChannel.send(JSON.stringify(playerData));
-      }
-    } else {
-      this.dataChannels.forEach((dataChannel, peerId) => {
-        if (dataChannel.readyState === 'open') {
-          dataChannel.send(JSON.stringify(playerData));
-        }
-      });
-    }
-  }
-
-  handlePlayerData(message) {
-    if (message.type === 'player-data') {
-      this.handlePlayerData(message);
-    } else if (message.type === 'chat-message') {
-      this.handleChatMessage(message);
-    }
-  }
-
-  handleChatMessage(message) {
-    this.addChatMessage(message.sender, message.text, false);
-    createChatMessageBubble(message.playerId, message.sender, message.text, false);
-  }
-
-  handlePlayerLeft(message) {
-    this.removeOtherPlayer(message.playerId);
-    removeChatMessage(message.playerId);
-  }
-
-  createOrUpdateOtherPlayer(playerId, playerData) {
-    if (this.otherPlayers.has(playerId)) {
-      this.updateOtherPlayerPosition(playerId, playerData.position);
-    } else {
-      this.createOtherPlayer(playerId, playerData);
-    }
-  }
-
-  createOtherPlayer(playerId, playerData) {
-    if (window.scene && playerData.position) {
-      const playerGroup = new THREE.Group();
-      
-      const boardGeometry = new THREE.PlaneGeometry(10, 10);
-      const boardMaterial = new THREE.MeshStandardMaterial({ 
-        color: playerData.color || 0x3B82F6,
-        metalness: 0.8,
-        roughness: 0.2,
-        side: THREE.DoubleSide
-      });
-      const board = new THREE.Mesh(boardGeometry, boardMaterial);
-      board.rotation.x = -Math.PI / 2;
-      board.castShadow = true;
-      board.receiveShadow = true;
-      playerGroup.add(board);
-
-      let avatar;
-      if (playerData.avatar === 'boy') {
-        const bodyGeometry = new THREE.CylinderGeometry(0.5, 0.5, 1.5, 8);
-        const bodyMaterial = new THREE.MeshLambertMaterial({ color: 0x3B82F6 });
-        const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
-        body.position.y = 1.5;
-        
-        const headGeometry = new THREE.SphereGeometry(0.6, 8, 8);
-        const headMaterial = new THREE.MeshLambertMaterial({ color: 0xFCD34D });
-        const head = new THREE.Mesh(headGeometry, headMaterial);
-        head.position.y = 2.8;
-        
-        avatar = new THREE.Group();
-        avatar.add(body);
-        avatar.add(head);
-      } else {
-        const bodyGeometry = new THREE.CylinderGeometry(0.5, 0.5, 1.5, 8);
-        const bodyMaterial = new THREE.MeshLambertMaterial({ color: 0xEC4899 });
-        const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
-        body.position.y = 1.5;
-        
-        const headGeometry = new THREE.SphereGeometry(0.6, 8, 8);
-        const headMaterial = new THREE.MeshLambertMaterial({ color: 0xFCD34D });
-        const head = new THREE.Mesh(headGeometry, headMaterial);
-        head.position.y = 2.8;
-        
-        avatar = new THREE.Group();
-        avatar.add(body);
-        avatar.add(head);
-      }
-
-      avatar.position.y = 0.1;
-      avatar.castShadow = true;
-      playerGroup.add(avatar);
-
-      playerGroup.position.set(
-        playerData.position.x,
-        playerData.position.y,
-        playerData.position.z
-      );
-      playerGroup.rotation.y = playerData.position.rotation;
-      playerGroup.castShadow = true;
-      
-      window.scene.add(playerGroup);
-
-      const nameTag = this.createNameTag(playerData.name, playerData.color);
-      playerGroup.add(nameTag);
-
-      this.otherPlayers.set(playerId, {
-        group: playerGroup,
-        name: playerData.name,
-        color: playerData.color,
-        avatar: playerData.avatar
-      });
-
-      this.updatePlayersPanel();
-      console.log('Created other player:', playerId, playerData.name);
-    }
-  }
-
-  createNameTag(name, color) {
-    const canvas = document.createElement('canvas');
-    const context = canvas.getContext('2d');
-    canvas.width = 256;
-    canvas.height = 64;
-    
-    context.fillStyle = `#${color.toString(16).padStart(6, '0')}`;
-    context.fillRect(0, 0, canvas.width, canvas.height);
-    
-    context.font = '24px Arial';
-    context.fillStyle = '#FFFFFF';
-    context.textAlign = 'center';
-    context.textBaseline = 'middle';
-    context.fillText(name, canvas.width / 2, canvas.height / 2);
-    
-    const texture = new THREE.CanvasTexture(canvas);
-    const material = new THREE.SpriteMaterial({ map: texture });
-    const sprite = new THREE.Sprite(material);
-    sprite.position.y = 5;
-    sprite.scale.set(10, 2.5, 1);
-    return sprite;
-  }
-
-  updateOtherPlayerPosition(playerId, position) {
-    const otherPlayer = this.otherPlayers.get(playerId);
-    if (otherPlayer && otherPlayer.group) {
-      otherPlayer.group.position.set(position.x, position.y, position.z);
-      otherPlayer.group.rotation.y = position.rotation;
-    }
-  }
-
-  removeOtherPlayer(playerId) {
-    const otherPlayer = this.otherPlayers.get(playerId);
-    if (otherPlayer && otherPlayer.group && window.scene) {
-      window.scene.remove(otherPlayer.group);
-      this.otherPlayers.delete(playerId);
-      this.updatePlayersPanel();
-    }
-  }
-
-  updatePlayersPanel() {
-    const playersList = document.getElementById('players-list');
-    const playerCount = document.getElementById('player-count');
-    
-    if (playersList && playerCount) {
-      playersList.innerHTML = '';
-      playerCount.textContent = this.otherPlayers.size + 1;
-      
-      const currentPlayerItem = document.createElement('div');
-      currentPlayerItem.className = 'player-item';
-      currentPlayerItem.innerHTML = `
-        <div class="player-color" style="background-color: #${this.playerColor.toString(16).padStart(6, '0')};"></div>
-        <div class="player-name">${this.playerName} (You)</div>
-      `;
-      playersList.appendChild(currentPlayerItem);
-      
-      this.otherPlayers.forEach((player, playerId) => {
-        const playerItem = document.createElement('div');
-        playerItem.className = 'player-item';
-        playerItem.innerHTML = `
-          <div class="player-color" style="background-color: #${player.color.toString(16).padStart(6, '0')};"></div>
-          <div class="player-name">${player.name}</div>
-        `;
-        playersList.appendChild(playerItem);
-      });
-    }
-  }
-
-  sendPositionUpdate() {
-    if (window.playerAvatar) {
-      this.sendPlayerData();
-    }
-  }
-
-  setupChat() {
-    const chatInput = document.getElementById('chat-input');
-    const chatSend = document.getElementById('chat-send');
-    
-    if (chatSend) {
-      chatSend.addEventListener('click', () => this.sendChatMessage());
-    }
-    
-    if (chatInput) {
-      chatInput.addEventListener('keypress', (e) => {
-        if (e.key === 'Enter') {
-          this.sendChatMessage();
-          // Close sidebar and reset camera when Enter is pressed
-          this.closeChatInterface();
-        }
-      });
-
-      if (!window.isMobile) {
-        document.addEventListener('keydown', (e) => {
-          if (e.key === 't' || e.key === 'T') {
-            document.getElementById('sidebar').classList.add('active');
-            canMove = false;
-            document.querySelector('.modal-overlay').classList.add('active');
-            setTimeout(() => chatInput.focus(), 100);
+    // Presence sync (existing logic - unchanged)
+    multiplayer.gameChannel
+      .on('presence', { event: 'sync' }, () => {
+        const state = multiplayer.gameChannel.presenceState();
+        multiplayer.otherPlayers.forEach((playerData, pid) => {
+          if (pid !== multiplayer.playerId && playerData.group) {
+            scene.remove(playerData.group);
           }
         });
-      }
-    }
-  }
+        multiplayer.otherPlayers.clear();
 
-  sendChatMessage() {
-    const chatInput = document.getElementById('chat-input');
-    const message = chatInput.value.trim();
-    
-    if (message) {
-      const chatData = {
-        type: 'chat-message',
-        playerId: this.playerId,
-        sender: this.playerName,
-        text: message
-      };
-      
-      this.dataChannels.forEach((dataChannel, peerId) => {
-        if (dataChannel.readyState === 'open') {
-          dataChannel.send(JSON.stringify(chatData));
+        Object.entries(state).forEach(([key, presences]) => {
+          if (key !== multiplayer.playerId && presences.length > 0) {
+            const payload = presences[0]?.payload || {};
+            createOtherPlayerAvatar(key, payload);
+          }
+        });
+
+        updatePlayerCountAndList(state);
+        updateRoomInfoUI();
+      })
+      .on('presence', { event: 'join' }, ({ key, newPresences }) => {
+        if (key !== multiplayer.playerId && newPresences.length > 0) {
+          const payload = newPresences[0]?.payload || {};
+          createOtherPlayerAvatar(key, payload);
         }
+        updatePlayerCountAndList(multiplayer.gameChannel.presenceState());
+      })
+      .on('presence', { event: 'leave' }, ({ key }) => {
+        removeOtherPlayerAvatar(key);
+        updatePlayerCountAndList(multiplayer.gameChannel.presenceState());
       });
-      
-      this.addChatMessage(this.playerName, message, true);
-      createChatMessageBubble(this.playerId, this.playerName, message, true);
-      chatInput.value = '';
-    }
-  }
 
-  closeChatInterface() {
-    // Close sidebar
-    const sidebar = document.getElementById('sidebar');
-    const modalOverlay = document.querySelector('.modal-overlay');
-    
-    sidebar.classList.remove('active');
-    canMove = true;
-    modalOverlay.classList.remove('active');
-    
-    // Reset camera angle to current player direction
-    if (playerAvatar) {
-      targetCameraAngle = playerAvatar.rotation.y - Math.PI;
-    }
-    
-    // Re-lock controls if they were locked before
-    if (controls && !isMobile) {
-      setTimeout(() => {
-        if (canMove && !controls.isLocked) {
-          controls.lock();
+    // Broadcast messages
+    multiplayer.gameChannel
+      .on('broadcast', { event: 'player-move' }, ({ payload }) => {
+        if (payload.playerId !== multiplayer.playerId) {
+          updateOtherPlayerPosition(payload.playerId, payload.position, payload.rotation);
         }
-      }, 100);
-    }
-  }
+      })
+      .on('broadcast', { event: 'chat-message' }, ({ payload }) => {
+        addChatMessage(payload.sender, payload.text, false);
+        createChatMessageBubble(payload.playerId, payload.sender, payload.text, false);
+      });
 
-  addChatMessage(sender, message, isOwn) {
-    const chatMessages = document.getElementById('chat-messages');
-    if (chatMessages) {
-      const messageElement = document.createElement('div');
-      messageElement.className = 'chat-message';
-      
-      if (isOwn) {
-        messageElement.innerHTML = `<span class="chat-sender">You:</span> ${message}`;
-      } else {
-        messageElement.innerHTML = `<span class="chat-sender">${sender}:</span> ${message}`;
+    // Subscribe and start game on success
+    await multiplayer.gameChannel.subscribe(async (status) => {
+      if (status === 'SUBSCRIBED') {
+        await multiplayer.gameChannel.track({
+          name: multiplayer.playerName,
+          color: multiplayer.playerColor,
+          avatar: selectedAvatar
+        });
+
+        console.log('✅ Joined room:', roomId);
+
+        // Update shareable URL
+        if (!urlParams.has('room')) {
+          const newUrl = new URL(window.location);
+          newUrl.searchParams.set('room', roomId);
+          window.history.replaceState({}, '', newUrl);
+        }
+
+        updateRoomInfoUI();
+
+        // === NOW START THE 3D GAME ===
+        startGame();
       }
-      
-      chatMessages.appendChild(messageElement);
-      chatMessages.scrollTop = chatMessages.scrollHeight;
-    }
-  }
-
-  disconnect() {
-    this.broadcastSignal({
-      type: 'player-left',
-      playerId: this.playerId
     });
-    
-    this.peers.forEach((peerConnection, peerId) => peerConnection.close());
-    this.otherPlayers.forEach((player, playerId) => this.removeOtherPlayer(playerId));
-    if (this.signalingChannel) this.signalingChannel.close();
-  }
+  });
+}
+/* ==============================
+   MULTIPLAYER POSITION BROADCAST
+============================== */
+function sendPositionUpdate() {
+  if (!multiplayer.gameChannel || !playerAvatar || !multiplayer.playerId) return;
+  const position = playerAvatar.position;
+  const rotation = playerAvatar.rotation.y;
+
+  multiplayer.gameChannel.send({
+    type: 'broadcast',
+    event: 'player-move',
+    payload: {
+      playerId: multiplayer.playerId,
+      position: { x: position.x, y: position.y, z: position.z },
+      rotation: rotation
+    }
+  });
 }
 
-// Clean up bots when leaving
-window.addEventListener('beforeunload', () => {
-  if (multiplayer) {
-    multiplayer.disconnect();
+function updateOtherPlayerPosition(playerId, position, rotation) {
+  const otherPlayer = multiplayer.otherPlayers.get(playerId);
+  if (!otherPlayer || !otherPlayer.group) return;
+  otherPlayer.group.position.lerp(new THREE.Vector3(position.x, position.y, position.z), 0.2);
+  otherPlayer.group.rotation.y = rotation;
+}
+
+function createOtherPlayerAvatar(playerId, payload) {
+  const group = new THREE.Group();
+
+  const boardGeometry = new THREE.PlaneGeometry(10, 10);
+  const boardMaterial = new THREE.MeshStandardMaterial({
+    color: payload.color || 0x8888ff,
+    metalness: 0.8,
+    roughness: 0.2,
+    side: THREE.DoubleSide
+  });
+  const board = new THREE.Mesh(boardGeometry, boardMaterial);
+  board.rotation.x = -Math.PI / 2;
+  board.castShadow = true;
+  group.add(board);
+
+  const glowGeometry = new THREE.PlaneGeometry(10.5, 10.5);
+  const glowMaterial = new THREE.MeshBasicMaterial({
+    color: payload.color || 0x8888ff,
+    transparent: true,
+    opacity: 0.7,
+    side: THREE.DoubleSide
+  });
+  const glow = new THREE.Mesh(glowGeometry, glowMaterial);
+  glow.rotation.x = -Math.PI / 2;
+  glow.position.y = -0.1;
+  group.add(glow);
+
+  group.position.set(-150, hoverHeight, -150);
+  scene.add(group);
+
+  multiplayer.otherPlayers.set(playerId, {
+    group: group,
+    name: payload.name || 'Guest',
+    color: payload.color || 0x8888ff
+  });
+}
+
+function removeOtherPlayerAvatar(playerId) {
+  const player = multiplayer.otherPlayers.get(playerId);
+  if (player && player.group) {
+    scene.remove(player.group);
   }
-  if (botManager) {
-    botManager.dispose();
-  }
-});
+  multiplayer.otherPlayers.delete(playerId);
+}
+
+/* ==============================
+   startGame() - No old multiplayer init
+============================== */
+async function startGame() {
+  initSidebar();
+
+  init3DScene();
+
+  botManager = new BotManager(scene, multiplayer, {
+    maxBots: 8,
+    roamRadius: worldBoundary * 0.9,
+    moveSpeed: 4.0,
+    detectionRange: 100,
+    interactionRange: 25,
+    stateDuration: 8000
+  });
+
+  loadNFTs();
+  initTokenSystem();
+  initBuildingOwnership();
+  setupBulletPurchaseWithTokens();
+
+
+}
 
 console.log("NFT Shooter Universe initialized successfully!");
