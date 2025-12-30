@@ -2554,7 +2554,8 @@ function animate() {
   updateBullets();
   checkNFTInteraction();
   updateNFTLOD();
-
+  updateAllChatBubbles();
+   
   // Bots
   if (botManager) botManager.update();
 
@@ -2905,64 +2906,137 @@ function setupMobileControls() {
 }
       
 /* ==============================
-   CHAT SYSTEM
+   CHAT SYSTEM - IMPROVED & OPTIMIZED
 ============================== */
 
+/**
+ * Creates a temporary chat bubble above a player's avatar.
+ * Uses manual world-to-screen projection for accurate positioning.
+ * Bubble fades out after 10 seconds.
+ *
+ * @param {string} playerId - Unique player ID (local or remote)
+ * @param {string} playerName - Display name of the player
+ * @param {string} message - Chat message text
+ * @param {boolean} [isOwn=false] - Whether this is the local player's message
+ */
 function createChatMessageBubble(playerId, playerName, message, isOwn = false) {
+  removeChatMessage(playerId);
+
+  const chatBubble = document.createElement('div');
+  chatBubble.className = `chat-bubble ${isOwn ? 'own-message' : ''}`;
+  chatBubble.innerHTML = `
+    <div class="chat-bubble-sender">${escapeHtml(playerName)}</div>
+    <div class="chat-bubble-text">${escapeHtml(message)}</div>
+  `;
+
+  document.body.appendChild(chatBubble);
+
+  // Initial fade-in
+  setTimeout(() => chatBubble.style.opacity = '1', 10);
+
+  // Auto-remove after 10 seconds
+  const timer = setTimeout(() => {
     removeChatMessage(playerId);
-    
-    const chatBubble = document.createElement('div');
-    chatBubble.className = `chat-bubble ${isOwn ? 'own-message' : ''}`;
-    chatBubble.innerHTML = `
-        <div class="chat-bubble-sender">${playerName}</div>
-        <div class="chat-bubble-text">${message}</div>
-    `;
-    
-    document.body.appendChild(chatBubble);
-    
-    let playerPosition;
-    if (playerId === multiplayer.playerId) {
-        playerPosition = window.playerAvatar ? window.playerAvatar.position.clone() : new THREE.Vector3(-150, 3, -150);
-    } else {
-        const otherPlayer = multiplayer.otherPlayers.get(playerId);
-        playerPosition = otherPlayer && otherPlayer.group ? 
-            otherPlayer.group.position.clone() : 
-            new THREE.Vector3(0, 0, 0);
-    }
-    
-    const screenPosition = playerPosition.clone();
-    screenPosition.project(camera);
-    
-    const x = (screenPosition.x * 0.5 + 0.5) * window.innerWidth;
-    const y = -(screenPosition.y * 0.5 - 0.5) * window.innerHeight;
-    
-    chatBubble.style.left = `${x}px`;
-    chatBubble.style.top = `${y - 50}px`;
-    
-    const timer = setTimeout(() => {
-        removeChatMessage(playerId);
-    }, 10000);
-    
-    activeChatMessages.set(playerId, {
-        element: chatBubble,
-        timer: timer,
-        position: playerPosition
-    });
-    
-    setTimeout(() => chatBubble.style.opacity = '1', 10);
-    return chatBubble;
+  }, 10000);
+
+  // Store for management and updates
+  activeChatMessages.set(playerId, {
+    element: chatBubble,
+    timer,
+    playerId
+  });
+
+  // Initial positioning
+  updateChatBubblePosition(playerId);
+
+  return chatBubble;
 }
 
-function removeChatMessage(playerId) {
-    if (activeChatMessages.has(playerId)) {
-        const { element, timer } = activeChatMessages.get(playerId);
-        clearTimeout(timer);
-        element.style.opacity = '0';
-        setTimeout(() => {
-            if (element.parentNode) element.parentNode.removeChild(element);
-        }, 300);
-        activeChatMessages.delete(playerId);
+/**
+ * Updates the screen position of a chat bubble based on the player's current 3D position.
+ * Called every frame from the animation loop for smooth following.
+ *
+ * @param {string} playerId
+ */
+function updateChatBubblePosition(playerId) {
+  const data = activeChatMessages.get(playerId);
+  if (!data || !camera) return;
+
+  let playerPosition = new THREE.Vector3(0, 0, 0);
+
+  if (playerId === multiplayer.playerId) {
+    // Local player
+    if (window.playerAvatar) {
+      playerPosition.copy(window.playerAvatar.position);
+    } else {
+      playerPosition.set(-150, 3, -150);
     }
+  } else {
+    // Remote player
+    const otherPlayer = multiplayer.otherPlayers.get(playerId);
+    if (otherPlayer && otherPlayer.group) {
+      playerPosition.copy(otherPlayer.group.position);
+    }
+  }
+
+  // Raise above head
+  playerPosition.y += 8;
+
+  // Project to normalized device coordinates (-1 to +1)
+  playerPosition.project(camera);
+
+  // Check if behind camera (optional: hide if behind)
+  if (playerPosition.z > 1) {
+    data.element.style.visibility = 'hidden';
+    return;
+  } else {
+    data.element.style.visibility = 'visible';
+  }
+
+  // Convert to screen pixels
+  const x = (playerPosition.x *  0.5 + 0.5) * window.innerWidth;
+  const y = (playerPosition.y * -0.5 + 0.5) * window.innerHeight;
+
+  data.element.style.left = `${x}px`;
+  data.element.style.top  = `${y - 30}px`; // Offset upward for better centering
+}
+
+/**
+ * Updates all active chat bubbles every frame.
+ * Add this call inside your animate() function:
+ *   updateAllChatBubbles();
+ */
+function updateAllChatBubbles() {
+  activeChatMessages.forEach((_, playerId) => {
+    updateChatBubblePosition(playerId);
+  });
+}
+
+/**
+ * Removes a chat bubble (fade out + cleanup)
+ * @param {string} playerId
+ */
+function removeChatMessage(playerId) {
+  if (activeChatMessages.has(playerId)) {
+    const { element, timer } = activeChatMessages.get(playerId);
+    clearTimeout(timer);
+    element.style.opacity = '0';
+    setTimeout(() => {
+      if (element.parentNode) {
+        element.parentNode.removeChild(element);
+      }
+    }, 300);
+    activeChatMessages.delete(playerId);
+  }
+}
+
+/**
+ * Simple HTML escape to prevent XSS in chat
+ */
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
 }
 
 /* ==============================
@@ -3156,15 +3230,15 @@ function removeOtherPlayerAvatar(playerId) {
 }
 
 /* ==============================
-   startGame() - No old multiplayer init
+   startGame() - Entry point after avatar selection & room join
 ============================== */
 async function startGame() {
   initSidebar();
-
   init3DScene();
 
+  // Spawn only 4 assistant bots
   botManager = new BotManager(scene, multiplayer, {
-    maxBots: 8,
+    maxBots: 4,
     roamRadius: worldBoundary * 0.9,
     moveSpeed: 4.0,
     detectionRange: 100,
@@ -3177,7 +3251,37 @@ async function startGame() {
   initBuildingOwnership();
   setupBulletPurchaseWithTokens();
 
-
+  // Make sure chat bubbles follow players smoothly
+  // (this was added in the improved chat system)
+  if (typeof updateAllChatBubbles === 'function') {
+    // Will be called every frame in animate()
+  }
 }
 
+/* ==============================
+   Room Share Link - Copy to Clipboard
+============================== */
+document.addEventListener('DOMContentLoaded', () => {
+  const shareLink = document.getElementById('room-share-link');
+  if (shareLink) {
+    shareLink.addEventListener('click', () => {
+      const url = window.location.href;
+      navigator.clipboard.writeText(url).then(() => {
+        shareLink.textContent = 'Copied!';
+        setTimeout(() => {
+          shareLink.textContent = 'Copy Link';
+        }, 2000);
+      }).catch(() => {
+        shareLink.textContent = 'Failed';
+        setTimeout(() => {
+          shareLink.textContent = 'Copy Link';
+        }, 2000);
+      });
+    });
+  }
+});
+
+/* ==============================
+   Final initialization message
+============================== */
 console.log("NFT Shooter Universe initialized successfully!");
