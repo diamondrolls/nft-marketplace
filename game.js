@@ -2351,7 +2351,7 @@ function initMiniMap() {
 function checkIfOnBridge(position) {
   for (const segment of bridgeSegments) {
     const distance = position.distanceTo(segment.position);
-    if (distance < 40 && Math.abs(position.y - segment.position.y) < 20) {
+    if (distance < 100 && Math.abs(position.y - segment.position.y) < 80) {
       return true;
     }
   }
