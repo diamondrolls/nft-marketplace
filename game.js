@@ -2605,14 +2605,14 @@ function animate() {
       // Find nearest bridge segment Y
       let closestY = hoverHeight;
       for (const seg of bridgeSegments) {
-        if (newPos.distanceTo(seg.position) < 40) {
+        if (newPos.distanceTo(seg.position) < 100) {
           closestY = seg.position.y;
           break;
         }
       }
       targetY = closestY + hoverHeight;
     } else if (checkIfOnUpper(newPos)) {
-      targetY = 750 + hoverHeight;
+      targetY = 950 + hoverHeight;
     }
 
     // Apply hover bob
